@@ -49,7 +49,7 @@ __device__ __host__ void make_pd(Matrix9x9& mat)
 {
     Vector9   eigen_values;
     Matrix9x9 eigen_vectors;
-    muda::eigen::evd(mat, eigen_values, eigen_vectors);
+    muda::eigen::evd<Float, 9>(mat, eigen_values, eigen_vectors);
     for(int i = 0; i < 9; ++i)
     {
         if(eigen_values(i) < 0)
