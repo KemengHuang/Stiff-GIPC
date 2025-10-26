@@ -12,7 +12,7 @@ Source code contributor: [Kemeng Huang](https://kemenghuang.github.io), Xinyu Lu
 **Note: this software is released under the MPLv2.0 license. For commercial use, please email the authors for negotiation.**
 
 ## video 1
-[![Watch the video](https://github.com/KemengHuang/Unified-GPU-IPC-Framework/blob/main/Assets/teaser.JPG)](https://www.youtube.com/watch?v=3TBoTX2vag4&list=LL)
+[![Watch the video](https://github.com/KemengHuang/Stiff-GIPC/blob/main/Assets/teaser.JPG)](https://www.youtube.com/watch?v=3TBoTX2vag4&list=LL)
 
 ## BibTex 
 
