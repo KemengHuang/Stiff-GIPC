@@ -12,7 +12,7 @@ if(UNIX)
     set(CMAKE_CXX_FLAGS "-O3")
 endif()
 
-project(gpu_ipc LANGUAGES CXX CUDA)
+project(StiffGIPC LANGUAGES CXX CUDA)
 
 # generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -36,12 +36,12 @@ endif()
 
 add_executable(gipc)
 target_compile_features(gipc PRIVATE cuda_std_17)
-target_include_directories(gipc PRIVATE "GPU_IPC/")
-target_include_directories(gipc PRIVATE "GPU_IPC/muda/src/")
+target_include_directories(gipc PRIVATE "StiffGIPC/")
+target_include_directories(gipc PRIVATE "StiffGIPC/muda/src/")
 file(GLOB_RECURSE GIPC_SOURCE CONFIGURE_DEPENDS 
-    "GPU_IPC/*.cu" "GPU_IPC/*.cpp")
+    "StiffGIPC/*.cu" "StiffGIPC/*.cpp")
 file(GLOB_RECURSE GIPC_HANDER CONFIGURE_DEPENDS 
-    "GPU_IPC/*.h" "GPU_IPC/*.cuh" "GPU_IPC/*.hpp" "GPU_IPC/*.inl" "GPU_IPC/*.inc")
+    "StiffGIPC/*.h" "StiffGIPC/*.cuh" "StiffGIPC/*.hpp" "StiffGIPC/*.inl" "StiffGIPC/*.inc")
 target_sources(gipc PRIVATE ${GIPC_SOURCE} ${GIPC_HANDER})
 
 # add assets and output directory, that we can easily access them in the code
