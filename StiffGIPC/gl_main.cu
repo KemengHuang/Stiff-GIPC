@@ -744,7 +744,7 @@ void DefaultSettings()
     ipc.relative_dhat           = 1e-3;
     ipc.bendStiff = ipc.bendYoungModulus * pow(ipc.clothThickness, 3)
                     / (24 * (1 - ipc.PoissonRate * ipc.PoissonRate));
-    ipc.shearStiff = 0.3 * ipc.stretchStiff;
+    ipc.shearStiff = 0.03 * ipc.stretchStiff * ipc.strainRate;
 }
 int  meshids = 0;
 void LoadSettings()
@@ -798,7 +798,7 @@ void LoadSettings()
         ipc.bendStiff = ipc.bendYoungModulus * pow(ipc.clothThickness, 3)
                         / (24 * (1 - ipc.PoissonRate * ipc.PoissonRate));
 
-        ipc.shearStiff = ipc.clothYoungModulus / (2 * (1 + ipc.PoissonRate)) * 0.03;
+        ipc.shearStiff = 0.03 * ipc.stretchStiff * ipc.strainRate;
 
         printf("ipc.shearStiff: %f\n", ipc.shearStiff);
         //ipc.shearStiff =
@@ -1340,6 +1340,7 @@ void display(void)
         SaveScreenShot(window_width, window_height, file_path);
     }
     step++;
+    printf("step:  %d\n", step);
     //if(step > 250)
     //{
     //    saveSurface = true;
