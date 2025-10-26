@@ -1,0 +1,11 @@
+GPU_IPC/.vs
+GPU_IPC/mLBVH/x64
+GPU_IPC/x64
+GPU_IPC/saveScreen
+GPU_IPC/*.zip
+GPU_IPC/mLBVH/saveScreen*
+GPU_IPC/mLBVH/saveSurface*
+GPU_IPC/mLBVH/*.mp4
+GPU_IPC/mLBVH/triMesh/body*
+build*
+Output/*
