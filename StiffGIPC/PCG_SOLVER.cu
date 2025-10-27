@@ -1977,9 +1977,9 @@ void BHessian::MALLOC_DEVICE_MEM_O(const int& tet_number,
                                    const int& tri_Edge_number)
 {
 
-    int minCollisionBuffer4 = std::max(2 * (surfvert_number + surfEdge_number), 100000);
-    int minCollisionBuffer3 = std::max(2 * (surfvert_number + surfEdge_number), 100000);
-    int minCollisionBuffer2 = std::max(2 * (surfvert_number + surfEdge_number), 100000);
+    int minCollisionBuffer4 = std::max(2 * (surfvert_number + surfEdge_number), 200000);
+    int minCollisionBuffer3 = std::max(2 * (surfvert_number + surfEdge_number), 200000);
+    int minCollisionBuffer2 = std::max(2 * (surfvert_number + surfEdge_number), 200000);
     int minCollisionBuffer1 = 2 * surfvert_number;
 
 

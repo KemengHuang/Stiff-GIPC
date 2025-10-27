@@ -521,7 +521,7 @@ void draw_Scene3D()
     glRotatef(xRot, 1.0f, 0.0f, 0.0f);
     glRotatef(yRot, 0.0f, 1.0f, 0.0f);
 
-    draw_box3D(-2, -1, -2, 4, 4, 4, 1);
+    //draw_box3D(-2, -1, -2, 4, 4, 4, 1);
     if(drawSurface)
     {
         draw_mesh3D();
@@ -886,7 +886,7 @@ void set_case1() {
 void set_case2()
 {
     gipc::SimpleSceneImporter importer;
-    double                    scale           = 1;
+    double                    scale           = 0.2;
     double3                   position_offset = make_double3(0, -0.5, 0);
     Eigen::Matrix4d           transform       = Eigen::Matrix4d::Identity();
     transform.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * scale;
@@ -894,7 +894,7 @@ void set_case2()
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
 
 
-    string mesh0_path = assets_dir + "tetMesh/bunny10.msh";
+    string mesh0_path = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
                            3,
                            gipc::BodyType::ABD,
@@ -935,6 +935,16 @@ void set_case2()
                            ipc.pcg_data.P_type);
 }
 
+void set_case3()
+{
+
+    gipc::SimpleSceneImporter importer{assets_dir + "scene/json/wrecking-ball-simple.json",
+                                       assets_dir + "tetMesh/wrecking-ball-mesh/",
+                                       gipc::BodyType::ABD};
+    importer.import_scene(tetMesh);
+}
+
+
 void setMAS_partition() {
     tetMesh.partId_map_real.resize(tetMesh.part_offset * BANKSIZE, -1);
     tetMesh.real_map_partId.resize(tetMesh.partId.size());
@@ -969,14 +979,18 @@ void initScene1()
     ipc.use_new_linear_system = true;
     ipc.pcg_data.P_type       = 1;
 
-    if(0)  // box pipe
+    int scene_no = 2;
+    switch(scene_no)
     {
-        set_case1();
-    }
-    if(1)
-    {
-        set_case2();
-        
+        case 0:  // box pipe
+            set_case1();
+            break;
+        case 1:  // soft-rigid-cloth coupling
+            set_case2();
+            break;
+        case 2:  //wrecking ball case
+            set_case3();
+            break;
     }
 
 

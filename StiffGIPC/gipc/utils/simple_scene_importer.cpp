@@ -41,39 +41,40 @@ Eigen::Vector3d read_angular_field(const nlohmann::json& field)
 SimpleSceneImporter::SimpleSceneImporter(std::string_view scene_file_name,
                                          std::string_view mesh_dir,
                                          BodyType         body_type)
-    : mesh_dir{mesh_dir}, body_type{body_type}
+    : mesh_dir{mesh_dir}
+    , body_type{body_type}
 {
     scene_json = json::parse(std::ifstream(std::string{scene_file_name}));
 }
 
 
-
-void SimpleSceneImporter::load_geometry(tetrahedra_obj& tetras,
-                   int             Dimensions,
-                   gipc::BodyType  bodyType,
-                   Eigen::Matrix4d transform,
-                   double          YoungthM,
-                   std::string     meth_path,
-                   int             preconditionerType)
+void SimpleSceneImporter::load_geometry(tetrahedra_obj&  tetras,
+                                        int              Dimensions,
+                                        gipc::BodyType   bodyType,
+                                        Eigen::Matrix4d  transform,
+                                        double           YoungthM,
+                                        std::string      meth_path,
+                                        int              preconditionerType,
+                                        BodyBoundaryType body_boundary_type)
 {
     if(Dimensions == 3)
     {
 
         if(bodyType == gipc::BodyType::ABD)
         {
-            tetras.load_tetrahedraMesh(meth_path, transform, 1e8, bodyType);
+            tetras.load_tetrahedraMesh(meth_path, transform, 1e8, bodyType, body_boundary_type);
         }
         else if(bodyType == gipc::BodyType::FEM)
         {
             if(preconditionerType)
             {
                 auto paths = metis_sort(meth_path, Dimensions);
-                tetras.load_tetrahedraMesh(paths[0], transform, YoungthM, bodyType);
+                tetras.load_tetrahedraMesh(paths[0], transform, YoungthM, bodyType, body_boundary_type);
                 tetras.load_parts(paths[1]);
             }
             else
             {
-                tetras.load_tetrahedraMesh(meth_path, transform, YoungthM, bodyType);
+                tetras.load_tetrahedraMesh(meth_path, transform, YoungthM, bodyType, body_boundary_type);
             }
         }
     }
@@ -104,7 +105,7 @@ void SimpleSceneImporter::import_scene(tetrahedra_obj& tetras)
         Eigen::Matrix3d R         = Eigen::Matrix3d::Identity();
 
         auto T = Eigen::Transform<double, 4, Eigen::Affine>::Identity();
-        
+
         if(rigid_body.find("rotation") != rigid_body.end())
         {
             Eigen::Vector3d rotation = read_angular_field(rigid_body["rotation"]);
@@ -116,10 +117,10 @@ void SimpleSceneImporter::import_scene(tetrahedra_obj& tetras)
 
         Eigen::Vector3d translation;
         from_json(rigid_body["position"], translation);
-
+        translation -= Eigen::Vector3d(11., 0., 30.);
         transform.block<3, 3>(0, 0) = R;
         transform.block<3, 1>(0, 3) = translation;
-        // transform *= Eigen::Vector4d{0.1, 0.1, 0.1, 1.0}.asDiagonal();
+        //transform *= Eigen::Vector4d{0.1, 0.1, 0.1, 1.0}.asDiagonal();
 
         auto is_fixed = rigid_body["is_dof_fixed"].get<bool>();
 
@@ -128,7 +129,7 @@ void SimpleSceneImporter::import_scene(tetrahedra_obj& tetras)
         auto boundary_type = is_fixed ? BodyBoundaryType::Fixed : BodyBoundaryType::Free;
         //tetras.load_tetrahedraMesh(mesh_file, transform, 1e8, body_type, boundary_type);
 
-        load_geometry(tetras, 3, body_type, transform, 1e8, mesh_file, 0);
+        load_geometry(tetras, 3, body_type, transform, 1e8, mesh_file, 1, boundary_type);
     }
 }
 

@@ -25,7 +25,8 @@ class SimpleSceneImporter
                               Eigen::Matrix4d transform,
                               double          YoungthM,
                               std::string     meth_path,
-                              int             preconditionerType);
+                              int             preconditionerType,
+                              BodyBoundaryType body_boundary_type = BodyBoundaryType::Free);
 };
 
 }  // namespace gipc
