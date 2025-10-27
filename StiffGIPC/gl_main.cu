@@ -912,7 +912,7 @@ void set_case2()
     string mesh1_path = mesh0_path;
     importer.load_geometry(tetMesh,
                            3,
-                           gipc::BodyType::FEM,
+                           gipc::BodyType::ABD,
                            transform,
                            1e5,
                            mesh1_path,
@@ -969,11 +969,11 @@ void initScene1()
     ipc.use_new_linear_system = true;
     ipc.pcg_data.P_type       = 1;
 
-    if(1)  // box pipe
+    if(0)  // box pipe
     {
         set_case1();
     }
-    if(0)
+    if(1)
     {
         set_case2();
         
@@ -1282,22 +1282,12 @@ void display(void)
     std::filesystem::exists(std::string{gipc::output_dir()})
         || std::filesystem::create_directory(std::string{gipc::output_dir()});
     auto output_path = std::string{gipc::output_dir()} + "saveSurface/";
-    //if(pri)
-    //{
 
-    //    saveSurfaceMesh(output_path + "surf_");
-    //    pri = false;
-    //}
     std::filesystem::exists(output_path) || std::filesystem::create_directory(output_path);
 
     if(stop)
         return;
 
-    //if(pri)
-    //{
-    //    saveSurfaceMesh(output_path + "surf_");
-    //    pri = false;
-    //}
 
     ipc.IPC_Solver(d_tetMesh);
 
@@ -1312,12 +1302,7 @@ void display(void)
                                   tetMesh.softNum * sizeof(double3),
                                   cudaMemcpyHostToDevice));
     }
-    //if(step == 20) {
-    //    std::string filename = "triMesh/body/body_obj_1.obj";
-    //    frameId++;
-    //    tetMesh.load_animation(filename, 1, make_double3(0, 0, -0.0));
-    //    CUDA_SAFE_CALL(cudaMemcpy(d_tetMesh.targetVert, tetMesh.targetPos.data(), tetMesh.softNum * sizeof(double3), cudaMemcpyHostToDevice));
-    //}
+
 
     CUDA_SAFE_CALL(cudaMemcpy(
         &bvs[0], ipc.bvh_e._bvs, (2 * ipc.edge_Num - 1) * sizeof(AABB), cudaMemcpyDeviceToHost));
@@ -1341,30 +1326,6 @@ void display(void)
     }
     step++;
     printf("step:  %d\n", step);
-    //if(step > 250)
-    //{
-    //    saveSurface = true;
-    //}
-    if(saveSurface)
-    {
-        if(pri)
-        {
-
-            saveTets(output_path + "surf_");
-            saveSurface = false;
-        }
-        // saveSurface = !saveSurface;
-    }
-    //outputAnimationMeshInfo("outCloth/cloth_", "outBody/body_");
-    //    if (step*ipc.IPC_dt >= 3) {
-    //        exit(0);
-    //    }
-    //if(step>=60){
-    //    exit(0);
-    //}
-    //   if(step > 25) 	{
-    //	exit(0);
-    //}
 
     //if(step >= 160)
     //{
