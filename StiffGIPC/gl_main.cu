@@ -925,7 +925,7 @@ void set_case2()
     transform.block<3, 1>(0, 3) =
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
     string mesh2_path = assets_dir + "triMesh/cloth_high.obj";
-    ;
+    
     importer.load_geometry(tetMesh,
                            2,
                            gipc::BodyType::FEM,
@@ -980,6 +980,9 @@ void initScene1()
     ipc.pcg_data.P_type       = 1;
 
     int scene_no = 2;
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     switch(scene_no)
     {
         case 0:  // box pipe
