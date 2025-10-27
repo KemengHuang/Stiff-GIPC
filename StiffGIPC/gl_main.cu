@@ -973,7 +973,7 @@ void setMAS_partition() {
     }
 }
 
-void initScene1()
+void initScene()
 {
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.use_new_linear_system = true;
@@ -1371,7 +1371,7 @@ void init(void)
 
     ipc.build_gipc_system(d_tetMesh);
 
-    initScene1();
+    initScene();
 
     if(!isSetShader)
     {

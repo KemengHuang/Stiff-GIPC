@@ -10,7 +10,7 @@ strain_Rate                                   1e2
 motion_stiffness                              1
 collision_detection_buff_scale                3
 motion_rate				      1
-ipc_time_step                                 1e-2
+ipc_time_step                                 2.0e-2
 pcg_solver_threshold                          1e-4
 Newton_solver_threshold                       1e-2
 IPC_ralative_dHat                             1e-3
