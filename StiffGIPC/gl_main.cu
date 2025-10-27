@@ -912,7 +912,7 @@ void set_case2()
     string mesh1_path = mesh0_path;
     importer.load_geometry(tetMesh,
                            3,
-                           gipc::BodyType::ABD,
+                           gipc::BodyType::FEM,
                            transform,
                            1e5,
                            mesh1_path,
