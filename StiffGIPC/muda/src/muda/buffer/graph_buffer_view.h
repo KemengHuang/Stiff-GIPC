@@ -47,8 +47,8 @@ class ComputeGraphVar<BufferView<T>> : public ComputeGraphVarBase
     };
     auto viewer() { return eval().viewer().name(this->name().data()); };
 
-    void                      update(const RWView& view);
-    ComputeGraphVar<VarType>& operator=(const RWView& view);
+    void                      update(const BufferView<T>& view);
+    ComputeGraphVar<BufferView<T>>& operator=(const BufferView<T>& view);
 
   private:
     RWView m_value;

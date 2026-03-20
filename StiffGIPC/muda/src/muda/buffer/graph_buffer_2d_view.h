@@ -47,8 +47,8 @@ class ComputeGraphVar<Buffer2DView<T>> : public ComputeGraphVarBase
     };
     auto viewer() { return eval().viewer().name(this->name().data()); };
 
-    void                      update(const RWView& view);
-    ComputeGraphVar<VarType>& operator=(const RWView& view);
+    void                      update(const Buffer2DView<T>& view);
+    ComputeGraphVar<Buffer2DView<T>>& operator=(const Buffer2DView<T>& view);
 
   private:
     RWView m_value;

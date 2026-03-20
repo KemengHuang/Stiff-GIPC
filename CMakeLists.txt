@@ -90,6 +90,8 @@ target_compile_options(gipc
         --ptxas-options=-allow-expensive-optimizations=true 
         -Xcudafe 
         "--display_error_number --diag_suppress=implicit_return_from_non_void_function --diag_suppress=2642"
+        # Ensure MSVC uses the standard-conforming preprocessor when nvcc invokes the host compiler
+        -Xcompiler "/Zc:preprocessor"
     >
     PUBLIC $<$<COMPILE_LANGUAGE:CUDA>: 
         --extended-lambda 
@@ -97,6 +99,9 @@ target_compile_options(gipc
         --default-stream=per-thread
     >
 )
+
+# Suppress CUDA/CCCL preprocessor error by defining the recommended macro as well.
+target_compile_definitions(gipc PRIVATE CCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING)
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${GIPC_SOURCE} ${GIPC_HANDER})
 

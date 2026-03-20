@@ -44,8 +44,8 @@ class ComputeGraphVar<VarView<T>> : public ComputeGraphVarBase
     operator ROView() const { return ceval(); }
     operator RWView() { return eval(); }
 
-    void                      update(const RWView& view);
-    ComputeGraphVar<VarType>& operator=(const RWView& view);
+    void                      update(const VarView<T>& view);
+    ComputeGraphVar<VarView<T>>& operator=(const VarView<T>& view);
 
   private:
     RWView m_value;
