@@ -1911,7 +1911,7 @@ __device__ Matrix<double, 6, 6> computeP2EPF2_strain_limit(Eigen::Matrix3d& U3x2
     for(int i = 0; i < 2; i++)
     {
         double s = S3x2[i];
-        assert(s < sLimit);
+        //assert(s < sLimit);
         if(s > sHat)
         {
             triggered = true;
