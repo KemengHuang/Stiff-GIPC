@@ -8590,7 +8590,7 @@ void GIPC::initBVH(int* _btype, int* _bodyId)
                surf_vertexNum);
 }
 
-void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer)
+void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer, double buffScale)
 {
     SceneSize     = bvh_f.scene;
     bboxDiagSize2 = __GEIGEN__::__squaredNorm(
@@ -8607,7 +8607,7 @@ void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double
         abd_fem_count_info.abd_body_num * 4 + abd_fem_count_info.fem_point_num;
 
 
-    uint32_t Minimum = 200000;
+    uint32_t Minimum = 100000 * buffScale;
     int minCollisionBuffer4 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
     int minCollisionBuffer3 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
     int minCollisionBuffer2 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
@@ -8626,12 +8626,12 @@ void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double
 
     gipc_global_triplet.resize(global_matrix_block3_size,
                                global_matrix_block3_size,
-                               total_max_global_triplet_num * 2);
+                               total_max_global_triplet_num * buffScale);
 
     gipc_global_triplet.global_external_max_capcity =
         total_internal_triplet_num + total_max_collision_triplet_num;
     gipc_global_triplet.resize_collision_hash_size(
-        gipc_global_triplet.global_external_max_capcity * 2);
+        gipc_global_triplet.global_external_max_capcity * buffScale);
 
 
     m_global_linear_system->gipc_global_triplet = &(gipc_global_triplet);
