@@ -20,7 +20,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # find packages
 enable_language(CUDA)
 find_package(Eigen3 REQUIRED)
-find_package(TBB REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
 find_package(OpenGL REQUIRED)
@@ -70,7 +69,7 @@ endif()
 
 target_link_libraries(gipc PRIVATE cusparse cublas cusolver cudart_static)
 target_link_libraries(gipc PRIVATE metis_partition CUDA::cudart)
-target_link_libraries(gipc PRIVATE GLUT::GLUT GLEW::GLEW OpenGL::GLU Eigen3::Eigen TBB::tbb)
+target_link_libraries(gipc PRIVATE GLUT::GLUT GLEW::GLEW OpenGL::GLU Eigen3::Eigen)
 target_link_libraries(gipc PRIVATE nlohmann_json::nlohmann_json)
 
 target_compile_features(gipc PRIVATE cxx_std_17)

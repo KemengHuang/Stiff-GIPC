@@ -23,8 +23,6 @@
 #include <gipc_path.h>
 #include <gipc/utils/timer.h>
 
-#include <tbb/parallel_for.h>
-
 #include <muda/cub/device/device_radix_sort.h>
 using namespace Eigen;
 #define RANK 2
@@ -10677,28 +10675,6 @@ bool GIPC::isIntersected(device_TetraData& TetMesh)
 }
 
 
-bool is_strain_limit_violated(Eigen::Vector2d* Sigma, int triangleNum)
-{
-    VectorXi violated(triangleNum);
-    violated.setZero();
-    double slimit = 1.1;
-    tbb::parallel_for(0,
-                      triangleNum,
-                      1,
-                      [&](int ii)
-                      {
-                          for(int i = 0; i < 2; i++)
-                          {
-                              double s = Sigma[ii][i];
-                              if(s > slimit * (1))
-                              {
-                                  violated[ii]++;
-                              }
-                          }
-                      });
-
-    return (violated.array() != 0).any();
-}
 
 bool GIPC::lineSearch(device_TetraData& TetMesh, double& alpha, const double& cfl_alpha)
 {
