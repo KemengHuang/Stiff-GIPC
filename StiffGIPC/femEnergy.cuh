@@ -98,6 +98,13 @@ __device__ double __cal_ARAP_energy_3D(const double3*                vertexes,
                                        const double&                 volume,
                                        const double&                 lenRate);
 
+__device__ double __cal_ARAPX_energy_3D(const double3* vertexes,
+                                        const uint4&   tetrahedra,
+                                        const __GEIGEN__::Matrix3x3d& DmInverse,
+                                        const double&                 volume,
+                                        const double&                 mu,
+                                        const double&                 lambda_);
+
 
 __device__ double __cal_bending_energy(const double3* vertexes,
                                        const double3* rest_vertexes,

@@ -150,7 +150,7 @@ class GIPC
 
     void FREE_DEVICE_MEM();
     void initBVH(int* _btype, int* _bodyId);
-    void init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer);
+    void init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer, double buffScale);
 
     void buildCP();
     void buildFullCP(const double& alpha);

@@ -9,7 +9,7 @@
 #include "femEnergy.cuh"
 #include "math.h"
 #include <stdio.h>
-
+#include <unsupported/Eigen/KroneckerProduct>
 
 template <int ROWS, int COLS>
 __device__ inline void write_triplet_fem(Eigen::Matrix3d* triplet_value,
@@ -1049,6 +1049,79 @@ __device__ double __cal_StabbleNHK_energy1_3D(const double3* vertexes,
     return 0.5 * (lenRate * (I2 - 3) + volRate * (Jminus1 * Jminus1)) * volume;
 }
 
+
+
+
+
+
+
+__device__ double __cal_ARAPX_energy_3D(const double3* vertexes,
+                                        const uint4&   tetrahedra,
+                                        const __GEIGEN__::Matrix3x3d& DmInverse,
+                                        const double&                 volume,
+                                        const double&                 mu,
+                                        const double&                 lambda_)
+{
+    __GEIGEN__::Matrix3x3d Ds;
+    __calculateDms3D_double(vertexes, tetrahedra, Ds);
+    __GEIGEN__::Matrix3x3d F;
+    __M_Mat_multiply(Ds, DmInverse, F);
+
+
+    Eigen::Matrix<double, 3, 3> MF, UU, VV;
+    Eigen::Matrix<double, 3, 1> Sigma;
+    for(int i = 0; i < 3; i++)
+    {
+        for(int j = 0; j < 3; j++)
+        {
+            MF(i, j) = F.m[i][j];
+        }
+    }
+
+    __GEIGEN__::math::qr_svd(MF, Sigma, UU, VV);
+
+
+    double          energy       = 0;
+    double          volume_stiff = lambda_;
+    Eigen::Matrix3d R            = Eigen::Matrix3d::Zero();
+    Eigen::Matrix3d S            = Eigen::Matrix3d::Zero();
+
+    Matrix3d sig = Sigma.asDiagonal();
+
+    R = UU * VV.transpose();
+    S = VV * sig * VV.transpose();
+
+    double          J = MF.determinant();
+    Eigen::Matrix3d A = S - Eigen::Matrix3d::Identity();
+
+    double T1          = (A).trace();
+    double T2          = (A * A).trace();
+    double T3          = (A * A * A).trace();
+    double volume_term = volume_stiff / 2.0 * (J - 1.0) * (J - 1.0);
+
+    int model = 2;
+    if(model == 2)
+    {
+        energy = mu / 2.0 * T2 + volume_term;
+    }
+    else if(model == 3)
+    {
+        energy = mu / 2.0 * T2 + mu / 6.0 * T3 + volume_term;
+    }
+    else if(model == 4)
+    {
+        energy = mu / 2.0 * T2 + mu / 6.0 * T3 + lambda_ / 2.0 * std::pow(T2, 2.0) + volume_term;
+    }
+    return energy * volume;
+}
+
+
+
+
+
+
+
+
 __device__ double __cal_ARAP_energy_3D(const double3*                vertexes,
                                        const uint4&                  tetrahedra,
                                        const __GEIGEN__::Matrix3x3d& DmInverse,
@@ -1716,6 +1789,349 @@ __device__ Matrix<double, 9, 9> __project_StabbleNHK_H_3D1_makePD(
     H = eigenvectors * eigenvalues.asDiagonal() * eigenvectors.transpose();
 }
 
+
+__device__ Eigen::Matrix<double, 3, 3> computePEPF_ARAPX_double(
+    const Eigen::Matrix<double, 3, 3>& F,
+    const Eigen::Matrix<double, 3, 3>& U,
+    const Eigen::Matrix<double, 3, 3>& V,
+    const Eigen::Matrix<double, 3, 1>& Sigma,
+    const double&                      mu,
+    const double&                      lambda_,
+    int model = 2)
+{
+    double volume_stiff = lambda_;
+
+    Eigen::Matrix3d R = U * V.transpose();
+    Eigen::Matrix3d S = V * Sigma.asDiagonal() * V.transpose();
+
+
+    Eigen::Matrix3d A = S - Eigen::Matrix3d::Identity();
+    double          J = F.determinant();
+
+
+    double T1          = (A).trace();
+    double T2          = (A * A).trace();
+    double T3          = (A * A * A).trace();
+    double volume_term = volume_stiff / 2.0 * (J - 1.0) * (J - 1.0);
+
+
+    Eigen::Matrix3d T2_d = 2.0 * F - 2.0 * R;
+    Eigen::Matrix3d T3_d = 3.0 * (F * S - 2.0 * F + R);
+
+    Eigen::Matrix3d volume_term_d =
+        volume_stiff * (J - 1.0) * J * F.inverse().transpose();
+
+    Eigen::Matrix3d PK1 = Eigen::Matrix3d::Zero();
+    if(model == 2)
+    {
+        PK1 = mu / 2.0 * T2_d + volume_term_d;
+    }
+    else if(model == 3)
+    {
+        PK1 = mu / 2.0 * T2_d + mu / 6.0 * T3_d + volume_term_d;
+    }
+    else if(model == 4)
+    {
+        PK1 = mu / 2.0 * T2_d + mu / 6.0 * T3_d
+              + lambda_ / 2.0 * (2.0 * T2 * T2_d) + volume_term_d;
+    }
+    return PK1;
+}
+
+__device__ Eigen::Matrix<double, 9, 9> compute_DRDF_Hessian(const Matrix3d& F,
+                                                 //const Matrix3d& U,
+                                                 const double& sigsum)
+                                                 //const Matrix3d& V)
+{
+
+    Eigen::Matrix<double, 9, 1> g1;
+    g1.block<3, 1>(0, 0) = 2 * F.col(0);
+    g1.block<3, 1>(3, 0) = 2 * F.col(1);
+    g1.block<3, 1>(6, 0) = 2 * F.col(2);
+    Eigen::Matrix<double, 9, 9> H1 = 2 * Eigen::Matrix<double, 9, 9>::Identity();
+    Eigen::Matrix3d             mat_g2 = 4 * F * F.transpose() * F;
+    Eigen::Matrix<double, 9, 1> g2;
+    g2.block<3, 1>(0, 0)                  = mat_g2.col(0);
+    g2.block<3, 1>(3, 0)                  = mat_g2.col(1);
+    g2.block<3, 1>(6, 0)                  = mat_g2.col(2);
+    Eigen::Matrix<double, 9, 9> D         = Eigen::Matrix<double, 9, 9>::Zero();
+    Eigen::Matrix<double, 9, 9> IkronFFT  = Eigen::Matrix<double, 9, 9>::Zero();
+    Eigen::Matrix<double, 9, 9> FTFkronI  = Eigen::Matrix<double, 9, 9>::Zero();
+    Eigen::Matrix3d             FFT       = F * F.transpose();
+    Eigen::Matrix3d             FTF       = F.transpose() * F;
+    Eigen::Matrix3d             Identity3 = Eigen::Matrix3d::Identity();
+    for(int i = 0; i < 3; i++)
+    {
+        for(int j = 0; j < 3; j++)
+        {
+            D.block<3, 3>(3 * i, 3 * j) = F.col(j) * F.col(i).transpose();
+            IkronFFT.block<3, 3>(3 * i, 3 * j) = Identity3(i, j) * FFT;
+            FTFkronI.block<3, 3>(3 * i, 3 * j) = FTF(i, j) * Identity3;
+        }
+    }
+    Eigen::Matrix<double, 9, 9> H2 = 4 * (IkronFFT + FTFkronI + D);
+    double                      J  = F.determinant();
+    Eigen::Matrix<double, 9, 1> gJ;
+    gJ.block<3, 1>(0, 0) = F.col(1).cross(F.col(2));
+    gJ.block<3, 1>(3, 0) = F.col(2).cross(F.col(0));
+    gJ.block<3, 1>(6, 0) = F.col(0).cross(F.col(1));
+    Eigen::Matrix3d f0hat, f1hat, f2hat;
+    f0hat << 0, -F(2, 0), F(1, 0), F(2, 0), 0, -F(0, 0), -F(1, 0), F(0, 0), 0;
+    f1hat << 0, -F(2, 1), F(1, 1), F(2, 1), 0, -F(0, 1), -F(1, 1), F(0, 1), 0;
+    f2hat << 0, -F(2, 2), F(1, 2), F(2, 2), 0, -F(0, 2), -F(1, 2), F(0, 2), 0;
+
+    Eigen::Matrix<double, 9, 9> HJ;
+    HJ.block<3, 3>(0, 0)           = Eigen::Matrix3d::Zero();
+    HJ.block<3, 3>(0, 3)           = -f2hat;
+    HJ.block<3, 3>(0, 6)           = f1hat;
+    HJ.block<3, 3>(3, 0)           = f2hat;
+    HJ.block<3, 3>(3, 3)           = Eigen::Matrix3d::Zero();
+    HJ.block<3, 3>(3, 6)           = -f0hat;
+    HJ.block<3, 3>(6, 0)           = -f1hat;
+    HJ.block<3, 3>(6, 3)           = f0hat;
+    HJ.block<3, 3>(6, 6)           = Eigen::Matrix3d::Zero();
+    Eigen::Matrix<double, 9, 1> g3 = 2 * J * gJ;
+    Eigen::Matrix<double, 9, 9> H3 = 2 * gJ * gJ.transpose() + 2 * J * HJ;
+    double                      i1 = F.squaredNorm();
+    double                      i2 = (F.transpose() * F).squaredNorm();
+    double                      i3 = (F.transpose() * F).determinant();
+
+    double a = 0;
+    double b = -2 * i1;
+    double c = -8 * J;
+    double d = i1 * i1 - 2 * (i1 * i1 - i2);
+
+
+    //Matrix3d           U, V;
+    //Matrix3d           sig;
+    //SVDResult3D_double svdResult = QRSVD(F);
+    ////Matrix3d U, sigma, V;
+    //U   = svdResult.U;
+    //sig = svdResult.SIGMA;
+    //V   = svdResult.V;
+
+    double f   = sigsum;
+    double f1  = (2 * f * f + 2 * i1) / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f2  = -2 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f3  = (8 * f) / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f11 = (4 * f * f1 + 2 - (12 * f * f * f1 - 4 * f - 4 * i1 * f1) * f1)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f12 = (4 * f * f2 - (12 * f * f * f2 - 4 * i1 * f2) * f1)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f13 = (4 * f * f3 - (12 * f * f * f3 - 4 * i1 * f3 - 8) * f1)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f21 = -(12 * f * f * f1 - 4 * f - 4 * i1 * f1) * f2
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f22 = -(12 * f * f * f2 - 4 * i1 * f2) * f2
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f23 = -(12 * f * f * f3 - 4 * i1 * f3 - 8) * f2
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f31 = (8 * f1 - (12 * f * f * f1 - 4 * f - 4 * i1 * f1) * f3)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f32 = (8 * f2 - (12 * f * f * f2 - 4 * i1 * f2) * f3)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+    double f33 = (8 * f3 - (12 * f * f * f3 - 4 * i1 * f3 - 8) * f3)
+                 / (4 * pow(f, 3) - 4 * i1 * f - 8 * J);
+
+    Eigen::Matrix<double, 9, 9> H =
+        -0.5
+        * ((-2 * f1) * H1 + (-2 * f2) * H2 + (-2 * f3) * HJ + (-2 * f11) * g1 * g1.transpose()
+           + (-2 * f22) * g2 * g2.transpose() + (-2 * f33) * gJ * gJ.transpose()
+           + (-2 * f12) * g2 * g1.transpose() + (-2 * f13) * gJ * g1.transpose()
+           + (-2 * f21) * g1 * g2.transpose() + (-2 * f23) * gJ * g2.transpose()
+           + (-2 * f31) * g1 * gJ.transpose() + (-2 * f32) * g2 * gJ.transpose());
+
+    return H;
+}
+
+__device__ Vector<double, 9> flatenMatrix3d(const Eigen::Matrix3d& matrix)
+{
+    Vector<double, 9> result;
+    result[0] = matrix(0, 0);
+    result[1] = matrix(1, 0);
+    result[2] = matrix(2, 0);
+    result[3] = matrix(0, 1);
+    result[4] = matrix(1, 1);
+    result[5] = matrix(2, 1);
+    result[6] = matrix(0, 2);
+    result[7] = matrix(1, 2);
+    result[8] = matrix(2, 2);
+
+    return result;
+}
+
+__device__ void cal_S_and_SF_RF(const Eigen::Matrix3d& F,
+                                Eigen::Matrix3d&       R,
+                                Matrix<double, 9, 9>& S_F,
+                                const Matrix<double, 9, 9>& R_F)
+{
+    // 固定矩阵 FT_F (9x9)
+    Matrix<double, 9, 9> FT_F = Matrix<double, 9, 9>::Zero();
+    FT_F(0, 0)                = 1.0;
+    FT_F(3, 1)                = 1.0;
+    FT_F(6, 2)                = 1.0;
+    FT_F(1, 3)                = 1.0;
+    FT_F(4, 4)                = 1.0;
+    FT_F(7, 5)                = 1.0;
+    FT_F(2, 6)                = 1.0;
+    FT_F(5, 7)                = 1.0;
+    FT_F(8, 8)                = 1.0;
+
+    Eigen::Matrix3d I3 = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d RT = R.transpose();  // 3x3
+    Eigen::Matrix3d FT = F.transpose();  // 3x3
+
+    // 1. 手动计算 kron(I3, RT) (9x9)
+    Matrix<double, 9, 9> kron_I3_RT = Matrix<double, 9, 9>::Zero();
+    for(int i = 0; i < 3; ++i)
+    {  // 块行索引
+        for(int r = 0; r < 3; ++r)
+        {  // 子矩阵行
+            for(int c = 0; c < 3; ++c)
+            {  // 子矩阵列
+                // 块 (i,i) 放置 RT
+                kron_I3_RT(i * 3 + r, i * 3 + c) = RT(r, c);
+            }
+        }
+    }
+
+    // 2. 手动计算 kron(FT, I3) (9x9)
+    Matrix<double, 9, 9> kron_FT_I3 = Matrix<double, 9, 9>::Zero();
+    for(int i = 0; i < 3; ++i)
+    {  // FT 的行索引
+        for(int j = 0; j < 3; ++j)
+        {                           // FT 的列索引
+            double val = FT(i, j);  // FT(i,j)
+            for(int k = 0; k < 3; ++k)
+            {  // I3 的对角线元素
+                // 子块 (i,j) 为 val * I3，因此只有对角位置 (k,k) 非零
+                kron_FT_I3(i * 3 + k, j * 3 + k) = val;
+            }
+        }
+    }
+
+    // 3. 计算 S_F = kron_I3_RT + kron_FT_I3 * FT_F * R_F
+    Matrix<double, 9, 9> temp = kron_FT_I3 * FT_F;        // 9x9
+    S_F                       = kron_I3_RT + temp * R_F;  // 9x9
+}
+
+__device__ Matrix<double, 9, 9> kron_3x3(const Matrix<double, 3, 3>& A,
+                                         const Matrix<double, 3, 3>& B)
+{
+    Matrix<double, 9, 9> result = Matrix<double, 9, 9>::Zero();
+    for(int i = 0; i < 3; ++i)
+    {
+        for(int j = 0; j < 3; ++j)
+        {
+            double a = A(i, j);
+            // 子块 (i,j) 放置 a * B
+            for(int r = 0; r < 3; ++r)
+            {
+                for(int c = 0; c < 3; ++c)
+                {
+                    result(i * 3 + r, j * 3 + c) = a * B(r, c);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+
+__device__ Eigen::Matrix<double, 9, 9> project_ARAPX_H_3D(
+    const Eigen::Matrix<double, 3, 3>& F,
+    const Eigen::Matrix<double, 3, 1>& Sigma,
+    const Eigen::Matrix<double, 3, 3>& U,
+    const Eigen::Matrix<double, 3, 3>& V,
+    const double&                      mu, 
+    const double&                      lambda_)
+{
+    double   volume_stiff = lambda_;
+    Matrix<double, 9, 9> hessian      = Matrix<double, 9, 9>::Zero();
+    {
+        Eigen::Matrix3d      R   = U * V.transpose();
+        Eigen::Matrix3d      S   = V * Sigma.asDiagonal() * V.transpose();
+        Matrix<double, 9, 9> S_F = Matrix<double, 9, 9>::Zero();
+        Matrix<double, 9, 9> R_F = Matrix<double, 9, 9>::Zero();
+
+        //Matrix3d sig3 = Sigma.asDiagonal();
+        R_F           = compute_DRDF_Hessian(F, Sigma.sum());
+
+        cal_S_and_SF_RF(F, R, S_F, R_F);
+
+
+        double          J   = F.determinant();
+        Eigen::Matrix3d I_3 = Eigen::Matrix3d::Identity();
+        Eigen::Matrix3d A   = S - Eigen::Matrix3d::Identity();
+        Matrix<double, 9, 9> I_9 = Matrix<double, 9, 9>::Identity();
+
+        double T1 = (A).trace();
+        double T2 = (A * A).trace();
+        double T3 = (A * A * A).trace();
+
+
+        Eigen::Matrix3d T2_d  = 2.0 * F - 2.0 * R;
+        Matrix<double, 9, 9> T2_d2 = Matrix<double, 9, 9>::Zero();
+        T2_d2                 = 2.0 * I_9 - 2.0 * R_F;
+        //Matrix<double, 9, 9> T3_d2 = Matrix<double, 9, 9>::Zero();
+
+        Matrix<double, 9, 9> kron_I3_S = kron_3x3(I_3, S);
+        // 手动计算 kron(I_3, F)
+        Matrix<double, 9, 9> kron_I3_F = kron_3x3(I_3, F);
+
+        // 组合表达式
+        Matrix<double, 9, 9> T3_d2 =
+            3.0 * (kron_I3_S + kron_I3_F * S_F - 2.0 * I_9 + R_F);
+
+        Matrix<double, 9, 9> volume_term_d2 = Matrix<double, 9, 9>::Zero();
+        Eigen::Matrix<double, 9, 1> pJpF;  // = J * F.inverse().transpose();
+        pJpF.block<3, 1>(0, 0) = F.col(1).cross(F.col(2));
+        pJpF.block<3, 1>(3, 0) = F.col(2).cross(F.col(0));
+        pJpF.block<3, 1>(6, 0) = F.col(0).cross(F.col(1));
+
+        Eigen::Matrix3d f0hat;
+        f0hat << 0, -F(2, 0), F(1, 0), F(2, 0), 0, -F(0, 0), -F(1, 0), F(0, 0), 0;
+        Eigen::Matrix3d f1hat;
+        f1hat << 0, -F(2, 1), F(1, 1), F(2, 1), 0, -F(0, 1), -F(1, 1), F(0, 1), 0;
+        Eigen::Matrix3d f2hat;
+        f2hat << 0, -F(2, 2), F(1, 2), F(2, 2), 0, -F(0, 2), -F(1, 2), F(0, 2), 0;
+        Eigen::Matrix<double, 9, 9> HJ;
+        HJ.block<3, 3>(0, 0) = Eigen::Matrix3d::Zero();
+        HJ.block<3, 3>(0, 3) = -f2hat;
+        HJ.block<3, 3>(0, 6) = f1hat;
+        HJ.block<3, 3>(3, 0) = f2hat;
+        HJ.block<3, 3>(3, 3) = Eigen::Matrix3d::Zero();
+        HJ.block<3, 3>(3, 6) = -f0hat;
+        HJ.block<3, 3>(6, 0) = -f1hat;
+        HJ.block<3, 3>(6, 3) = f0hat;
+        HJ.block<3, 3>(6, 6) = Eigen::Matrix3d::Zero();
+
+        volume_term_d2 += volume_stiff * pJpF * pJpF.transpose();
+        volume_term_d2 += volume_stiff * (J - 1.0) * HJ;
+
+        int model = 2;
+        if(model == 2)
+        {
+            hessian = mu / 2.0 * T2_d2 + volume_term_d2;
+        }
+        else if(model == 3)
+        {
+            hessian = mu / 2.0 * T2_d2 + mu / 6.0 * T3_d2 + volume_term_d2;
+        }
+        else if(model == 4)
+        {
+            hessian =
+                mu / 2.0 * T2_d2 + mu / 6.0 * T3_d2
+                + lambda_ / 2.0
+                      * (2.0 * (flatenMatrix3d(T2_d) * flatenMatrix3d(T2_d).transpose() + T2 * T2_d2))
+                + volume_term_d2;
+        }
+    }
+
+    makePDSNK<double, 9>(hessian);
+    return hessian;
+}
+
 __global__ void _calculate_fem_gradient_hessian(__GEIGEN__::Matrix3x3d* DmInverses,
                                                 const double3* vertexes,
                                                 const uint4*   tetrahedras,
@@ -1762,7 +2178,7 @@ __global__ void _calculate_fem_gradient_hessian(__GEIGEN__::Matrix3x3d* DmInvers
     }
     __GEIGEN__::math::qr_svd(MF, SS, UU, VV);
     Eigen::Matrix<double, 3, 3> eso_PEPF =
-        computePEPF_ARAP_double(MF, UU, VV, lenRate[idx]);
+        computePEPF_ARAPX_double(MF, UU, VV, SS, lenRate[idx], volRate[idx]);
     __GEIGEN__::Matrix3x3d PEPF;
     for(int i = 0; i < 3; i++)
     {
@@ -1810,7 +2226,7 @@ __global__ void _calculate_fem_gradient_hessian(__GEIGEN__::Matrix3x3d* DmInvers
     Eigen::Matrix<double, 9,9> Hq;
     __project_StabbleNHK_H_3D1_makePD(Hq, I3, lenRate[idx], volRate[idx], F);
 #else
-    Eigen::Matrix<double, 9, 9> Hq = project_ARAP_H_3D(SS, UU, VV, lenRate[idx]);
+    Eigen::Matrix<double, 9, 9> Hq = project_ARAPX_H_3D(MF, SS, UU, VV, lenRate[idx], volRate[idx]);
 #endif
 
     Eigen::Matrix<double, 12, 12> H;
@@ -1911,7 +2327,7 @@ __device__ Matrix<double, 6, 6> computeP2EPF2_strain_limit(Eigen::Matrix3d& U3x2
     for(int i = 0; i < 2; i++)
     {
         double s = S3x2[i];
-        assert(s < sLimit);
+        //assert(s < sLimit);
         if(s > sHat)
         {
             triggered = true;

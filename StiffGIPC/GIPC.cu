@@ -23,8 +23,6 @@
 #include <gipc_path.h>
 #include <gipc/utils/timer.h>
 
-#include <tbb/parallel_for.h>
-
 #include <muda/cub/device/device_radix_sort.h>
 using namespace Eigen;
 #define RANK 2
@@ -7538,8 +7536,8 @@ __global__ void _getFEMEnergy_Reduction_3D(double*        squeue,
     double temp = __cal_StabbleNHK_energy2_3D(
         vertexes, tetrahedras[idx], DmInverses[idx], volume[idx], lenRate[idx], volRate[idx]);
 #else
-    double temp = __cal_ARAP_energy_3D(
-        vertexes, tetrahedras[idx], DmInverses[idx], volume[idx], lenRate[idx]);
+    double temp = __cal_ARAPX_energy_3D(
+        vertexes, tetrahedras[idx], DmInverses[idx], volume[idx], lenRate[idx], volRate[idx]);
 #endif
 
     //printf("%f    %f\n\n\n", lenRate, volRate);
@@ -8592,7 +8590,7 @@ void GIPC::initBVH(int* _btype, int* _bodyId)
                surf_vertexNum);
 }
 
-void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer)
+void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double3 maxConer, double buffScale)
 {
     SceneSize     = bvh_f.scene;
     bboxDiagSize2 = __GEIGEN__::__squaredNorm(
@@ -8609,7 +8607,7 @@ void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double
         abd_fem_count_info.abd_body_num * 4 + abd_fem_count_info.fem_point_num;
 
 
-    uint32_t Minimum = 200000;
+    uint32_t Minimum = 100000 * buffScale;
     int minCollisionBuffer4 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
     int minCollisionBuffer3 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
     int minCollisionBuffer2 = std::max(2 * (surf_vertexNum + edge_Num), Minimum);
@@ -8628,12 +8626,12 @@ void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double
 
     gipc_global_triplet.resize(global_matrix_block3_size,
                                global_matrix_block3_size,
-                               total_max_global_triplet_num * 2);
+                               total_max_global_triplet_num * buffScale);
 
     gipc_global_triplet.global_external_max_capcity =
         total_internal_triplet_num + total_max_collision_triplet_num;
     gipc_global_triplet.resize_collision_hash_size(
-        gipc_global_triplet.global_external_max_capcity * 2);
+        gipc_global_triplet.global_external_max_capcity * buffScale);
 
 
     m_global_linear_system->gipc_global_triplet = &(gipc_global_triplet);
@@ -10677,28 +10675,6 @@ bool GIPC::isIntersected(device_TetraData& TetMesh)
 }
 
 
-bool is_strain_limit_violated(Eigen::Vector2d* Sigma, int triangleNum)
-{
-    VectorXi violated(triangleNum);
-    violated.setZero();
-    double slimit = 1.1;
-    tbb::parallel_for(0,
-                      triangleNum,
-                      1,
-                      [&](int ii)
-                      {
-                          for(int i = 0; i < 2; i++)
-                          {
-                              double s = Sigma[ii][i];
-                              if(s > slimit * (1))
-                              {
-                                  violated[ii]++;
-                              }
-                          }
-                      });
-
-    return (violated.array() != 0).any();
-}
 
 bool GIPC::lineSearch(device_TetraData& TetMesh, double& alpha, const double& cfl_alpha)
 {

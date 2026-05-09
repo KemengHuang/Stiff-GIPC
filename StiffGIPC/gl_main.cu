@@ -810,7 +810,7 @@ void set_case2()
     string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
                            3,
-                           gipc::BodyType::ABD,
+                           gipc::BodyType::FEM,
                            transform,
                            Youngth_Modulus,
                            mesh0_path,
@@ -839,13 +839,13 @@ void set_case2()
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
     string mesh2_path = assets_dir + "triMesh/cloth_high.obj";
 
-    importer.load_geometry(tetMesh,
-                           2,
-                           gipc::BodyType::FEM,
-                           transform,
-                           1e4,
-                           mesh2_path,
-                           ipc.pcg_data.P_type);
+    //importer.load_geometry(tetMesh,
+    //                       2,
+    //                       gipc::BodyType::FEM,
+    //                       transform,
+    //                       1e4,
+    //                       mesh2_path,
+    //                       ipc.pcg_data.P_type);
 }
 
 void set_case3()
@@ -1092,7 +1092,7 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 4;
+    int scene_no = 1;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1401,7 +1401,7 @@ void initScene()
 
 
     ipc.buildBVH();
-    ipc.init(tetMesh.meanMass, tetMesh.meanVolum, tetMesh.minConer, tetMesh.maxConer);
+    ipc.init(tetMesh.meanMass, tetMesh.meanVolum, tetMesh.minConer, tetMesh.maxConer, 1);
 
     printf("bboxDiagSize2: %f\n", ipc.bboxDiagSize2);
     printf("maxConer: %f  %f   %f           minCorner: %f  %f   %f\n",
