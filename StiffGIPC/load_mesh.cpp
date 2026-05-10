@@ -112,11 +112,11 @@ bool tetrahedra_obj::load_triMesh(const std::string&     filename,
     {
         boundaryType = BodyBoundaryType::Fixed;
     }
-    else
-    {
-        fprintf(stderr, "boundary type %d is not supported\n", mboundaryType);
-        std::abort();
-    }
+    //else
+    //{
+    //    fprintf(stderr, "boundary type %d is not supported\n", mboundaryType);
+    //    std::abort();
+    //}
 
     begin_load_body(filename, gipc::BodyType::FEM, boundaryType);
 
@@ -178,7 +178,7 @@ bool tetrahedra_obj::load_triMesh(const std::string&     filename,
                 targetIndex.push_back(tid);
             }
 
-            boundaryTypies.push_back(boundaryType);
+            boundaryTypies.push_back(mboundaryType);
 
             double3 velocity = make_double3(0, 0, 0);
             velocities.push_back(velocity);
@@ -383,7 +383,8 @@ bool tetrahedra_obj::load_triMesh(const std::string&     filename,
 }
 
 
-bool tetrahedra_obj::load_animation(const std::string& filename, double scale, double3 transform)
+bool tetrahedra_obj::load_animation(const std::string&     filename,
+                                    const Eigen::Matrix4d& transform)
 {
     ifstream ifs(filename);
     if(!ifs)
@@ -410,9 +411,11 @@ bool tetrahedra_obj::load_animation(const std::string& filename, double scale, d
         {
 
             ss >> x >> y >> z;
-            double3 vertex = make_double3(scale * x + transform.x,
-                                          scale * y + transform.y,
-                                          scale * z + transform.z);
+
+            Eigen::Vector4d V = transform * Eigen::Vector4d(x, y, z, 1);
+
+            double3 vertex = make_double3(V(0), V(1), V(2));
+
             targetPos.push_back(vertex);
         }
     }

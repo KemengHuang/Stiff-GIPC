@@ -13,7 +13,7 @@ bool GlobalLinearSystem::build_linear_system()
     // right hand side can only be provided by both LinearSubsystem
     m_rhs_count_per_subsystem.resize(gradient_provider_count);
     m_rhs_offset_per_subsystem.resize(gradient_provider_count);
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     for(auto& subsystem : m_subsystems)
         subsystem->report_subsystem_info();
 
@@ -27,17 +27,17 @@ bool GlobalLinearSystem::build_linear_system()
                         m_rhs_count_per_subsystem.end(),
                         m_rhs_offset_per_subsystem.begin(),
                         0);
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     for(auto& gp : m_inner_subsystems)
     {
         auto i = gp->gid();
         gp->dof_offset(m_rhs_offset_per_subsystem[i]);
     }
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     auto total_rhs_count =
         m_rhs_offset_per_subsystem.back() + m_rhs_count_per_subsystem.back();
 
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     if(gipc_global_triplet->global_triplet_offset == 0 || total_rhs_count == 0)
     {
         std::cout << "The global linear system is empty, skip *assembling, *solving and *solution distributing phase."
@@ -45,7 +45,7 @@ bool GlobalLinearSystem::build_linear_system()
         return false;
     }
 
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     m_b.resize(total_rhs_count);
     m_x.resize(total_rhs_count);
 
@@ -53,7 +53,7 @@ bool GlobalLinearSystem::build_linear_system()
 
     for(auto& subsystem : m_subsystems)
         subsystem->do_assemble(rhs_view);
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     int start_preconditioner_id = 0;
     if(m_local_preconditioners.size() && m_local_preconditioners[0]->preconditioner_id == 0)
     {
@@ -61,15 +61,15 @@ bool GlobalLinearSystem::build_linear_system()
         start_preconditioner_id++;
     }
     convert_new();
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     if(m_global_preconditioner)
         m_global_preconditioner->do_assemble(*gipc_global_triplet);
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     for(int i = start_preconditioner_id; i < m_local_preconditioners.size(); i++)
     {
         m_local_preconditioners[i]->assemble();
     }
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     return true;
 }
 
@@ -124,6 +124,7 @@ GlobalPreconditioner& GlobalLinearSystem::_create_preconditioner(U<GlobalPrecond
 gipc::SizeT GlobalLinearSystem::solve_linear_system()
 {
     bool success = build_linear_system();
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     if(!success)
         return 0;
     MUDA_ASSERT(m_solver, "Solver is null, call create_solver() to setup a solver.");

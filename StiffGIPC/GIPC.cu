@@ -22,7 +22,7 @@
 #include <gipc/statistics.h>
 #include <gipc_path.h>
 #include <gipc/utils/timer.h>
-
+#include <cmath>
 #include <muda/cub/device/device_radix_sort.h>
 using namespace Eigen;
 #define RANK 2
@@ -3126,7 +3126,7 @@ __global__ void _calBarrierGradientAndHessian(const double3*   _vertexes,
     double dHat_sqrt = sqrt(dHat);
     //double dHat = dHat_sqrt * dHat_sqrt;
     //double Kappa = 1;
-    double gassThreshold = 1e-6;
+    double gassThreshold = 1e-2;
     if(MMCVIDI.x >= 0)
     {
         if(MMCVIDI.w >= 0)
@@ -6398,7 +6398,7 @@ __global__ void _computeSoftConstraintGradientAndHessian(const double3* vertexes
     Hpg.m[2][0] = 0;
     Hpg.m[2][1] = 0;
     Hpg.m[2][2] = rate * rate * d;
-    int pidx    = atomicAdd(_gpNum, 1);
+    //int pidx    = atomicAdd(_gpNum, 1);
     //H3x3[pidx]    = Hpg;
     //D1Index[pidx] = vInd;
     vInd += global_hessian_fem_offset;
@@ -7538,6 +7538,8 @@ __global__ void _getFEMEnergy_Reduction_3D(double*        squeue,
 #else
     double temp = __cal_ARAPX_energy_3D(
         vertexes, tetrahedras[idx], DmInverses[idx], volume[idx], lenRate[idx], volRate[idx]);
+    //double temp = __cal_ARAP_energy_3D(
+    //    vertexes, tetrahedras[idx], DmInverses[idx], volume[idx], lenRate[idx]);
 #endif
 
     //printf("%f    %f\n\n\n", lenRate, volRate);
@@ -7945,7 +7947,7 @@ __global__ void _stepForward(double3* _vertexes,
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= numbers)
         return;
-    if(abs(bType[idx]) == 0 || moveBoundary)
+    if(abs(bType[idx]) == 0 || abs(bType[idx]) == 2 || moveBoundary)
     {
         _vertexes[idx] =
             __GEIGEN__::__minus(_vertexesTemp[idx],
@@ -8600,7 +8602,7 @@ void GIPC::init(double m_meanMass, double m_meanVolumn, double3 minConer, double
     meanMass     = m_meanMass;
     meanVolumn   = m_meanVolumn;
     dHat = relative_dhat * relative_dhat * bboxDiagSize2;  //__GEIGEN__::__squaredNorm(__GEIGEN__::__minus(maxConer, minConer));
-    fDhat = 1e-4 * bboxDiagSize2;
+    fDhat = 1e-6 * bboxDiagSize2;
 
 
     int global_matrix_block3_size =
@@ -10200,7 +10202,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
                        {
                            cfem_rows[i] = row + fem_global_hessian_index_offset;
                            cfem_cols[i] = col + fem_global_hessian_index_offset;
-                           if(btypeA != 0 || btypeB != 0)
+                           if((btypeA != 0 && btypeA != 2) || (btypeB != 0 && btypeA != 2))
                            {
                                cfem_vals[i].setZero();
                            }
@@ -10306,7 +10308,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
                        int col    = cfem_cols[i];
                        int btypeA = BDType[row - hess_index2fem_index];
                        int btypeB = BDType[col - hess_index2fem_index];
-                       if(btypeA != 0 || btypeB != 0)
+                       if((btypeA != 0&& btypeA != 2) || (btypeB != 0 && btypeB != 2))
                        {
                            triplet_fem[i].setZero();
                        }
@@ -10330,13 +10332,14 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
                    {
                        triplet_fem[i] =
                            mass[i + fem_pint_start] * gipc::Matrix3x3::Identity();
+                       //printf("mass:  %f\n", mass[i + fem_pint_start]);
                        cfem_rows[i] = i + abd_num * 4;
                        cfem_cols[i] = i + abd_num * 4;
                    });
         gipc_global_triplet.global_triplet_offset += abd_fem_count_info.fem_point_num;
 
-        //cudaMemcpy(TetMesh.totalForce, contact_grads, vertexNum * sizeof(double3), cudaMemcpyDeviceToDevice);
-        //getTotalForce(shape_grads, TetMesh.totalForce);
+        cudaMemcpy(TetMesh.totalForce, contact_grads, vertexNum * sizeof(double3), cudaMemcpyDeviceToDevice);
+        getTotalForce(shape_grads, TetMesh.totalForce);
     }
 
     return time00;
@@ -10585,7 +10588,7 @@ int GIPC::calculateMovingDirection(device_TetraData& TetMesh, int cpNum, int pre
 
     iter = m_global_linear_system->solve_linear_system();
 
-
+    CUDA_SAFE_CALL(cudaDeviceSynchronize());
     auto& json = gipc::Statistics::instance().at_current_frame();
     json["newton"].back()["pcg"]["iterations"] = iter;
     return iter;
@@ -10859,11 +10862,21 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
         cudaEventCreate(&end3);
         cudaEventCreate(&end4);
 
-        //printf("\n\n\ncollision num  %d\n\n\n", h_cpNum[0]+h_gpNum);
+
+        
 
         cudaEventRecord(start);
         timemakePd += computeGradientAndHessian(TetMesh);
 
+
+        //std::vector<double3> vertex_h(TetMesh.m_vertex_num);
+        //cudaMemcpy(vertex_h.data(),
+        //           TetMesh.totalForce,
+        //           TetMesh.m_vertex_num * sizeof(double3),
+        //           cudaMemcpyDeviceToHost);
+
+
+        printf("\n\n\ncollision num  %d\n\n\n", h_cpNum[0] + h_gpNum);
 
         double distToOpt_PN = calcMinMovement(_moveDir, pcg_data.squeue, vertexNum);
 
@@ -10932,7 +10945,7 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
         bool isStop = lineSearch(TetMesh, alpha, alpha_CFL);
 
         cudaEventRecord(end3);
-        postLineSearch(TetMesh, alpha);
+        //postLineSearch(TetMesh, alpha);
         //computeGradientAndHessian(TetMesh);
         cudaEventRecord(end4);
 
@@ -10950,12 +10963,12 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
         time3 += time33;
         time4 += time44;
         ////*cflTime = ptime;
-        //printf("time0 = %f,  time1 = %f,  time2 = %f,  time3 = %f,  time4 = %f\n",
-        //       time00,
-        //       time11,
-        //       time22,
-        //       time33,
-        //       time44);
+        printf("time0 = %f,  time1 = %f,  time2 = %f,  time3 = %f,  time4 = %f\n",
+               time00,
+               time11,
+               time22,
+               time33,
+               time44);
         (cudaEventDestroy(start));
         (cudaEventDestroy(end0));
         (cudaEventDestroy(end1));
@@ -11098,7 +11111,7 @@ void   GIPC::IPC_Solver(device_TetraData& TetMesh)
         printf("boundary alpha: %f\n  finished a step\n", alpha);
     }
 
-    TetMesh.update_soft_constraint_target_position(total_Frames + 1, IPC_dt);
+    //TetMesh.update_soft_constraint_target_position(total_Frames + 1, IPC_dt);
     //suggestKappa(Kappa);
     upperBoundKappa(Kappa);
     if(Kappa < 1e-16)

@@ -194,8 +194,10 @@ SizeT PCGSolver::pcg(muda::DenseVectorView<Float> x, muda::CDenseVectorView<Floa
 
     p   = z;
     rz0 = rz;
-
-    for(k = 1; k < max_iter; ++k)
+    int cgCounts = 0;
+    //if(rz0 == 0)
+    //    return 0;
+    while(cgCounts < 30000 && std::abs(rz) > m_config.global_tol_rate * rz0)
     {
         {
             //Timer timer{"spmv"};
@@ -229,8 +231,8 @@ SizeT PCGSolver::pcg(muda::DenseVectorView<Float> x, muda::CDenseVectorView<Floa
                                      (int)z.size());
         }
 
-        if(std::abs(rz) <= m_config.global_tol_rate * rz0)
-            break;
+        //if(std::abs(rz) <= m_config.global_tol_rate * rz0)
+        //    break;
 
         {
             //Timer timer{"preconditioner"};

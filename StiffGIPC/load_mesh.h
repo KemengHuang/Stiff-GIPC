@@ -147,7 +147,7 @@ class tetrahedra_obj
     bool load_triMesh(const std::string& filename, const Eigen::Matrix4d& transform, int boundaryType);
 
 
-    bool load_animation(const std::string& filename, double scale, double3 transform);
+    bool load_animation(const std::string& filename, const Eigen::Matrix4d& transform);
     bool load_tetrahedraMesh_IPC_TetMesh(const std::string& filename,
                                          double             scale,
                                          double3            position_offset,

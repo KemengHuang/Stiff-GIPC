@@ -519,7 +519,7 @@ void draw_Scene3D()
     glRotatef(xRot, 1.0f, 0.0f, 0.0f);
     glRotatef(yRot, 0.0f, 1.0f, 0.0f);
 
-    //draw_box3D(-2, -1, -2, 4, 4, 4, 1);
+    draw_box3D(-2, -1, -2, 4, 4, 4, 1);
     if(drawSurface)
     {
         draw_mesh3D();
@@ -810,7 +810,7 @@ void set_case2()
     string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
                            3,
-                           gipc::BodyType::FEM,
+                           gipc::BodyType::ABD,
                            transform,
                            Youngth_Modulus,
                            mesh0_path,
@@ -1058,6 +1058,93 @@ void set_case6()
     ipc.strainRate    = 1e6;
 }
 
+
+void set_case7()
+{
+    ipc.pcg_data.P_type = 0;
+
+    gipc::SimpleSceneImporter importer;
+    double                    scale = 1.0;
+    Eigen::Vector3d           position_offset{0, 0, 0};
+
+    using Transform = Eigen::Transform<double, 3, Eigen::Affine>;
+    Transform t     = Transform::Identity();
+    //t.rotate(Eigen::AngleAxisd(3.1415926 / 2, Eigen::Vector3d::UnitY()));
+    t.translate(position_offset);
+    t.scale(1.03);
+    Eigen::Matrix4d transform = t.matrix();
+
+    string mesh_path       = assets_dir + "tetMesh/cvpr_1.msh";
+    double Youngth_Modulus = 1e5;
+    ipc.PoissonRate        = 0.35;
+    importer.load_geometry(tetMesh,
+                           3,
+                           gipc::BodyType::FEM,
+                           transform,
+                           Youngth_Modulus,
+                           mesh_path,
+                           ipc.pcg_data.P_type);
+
+
+
+    //1, make_double3(-1, -0.5, -0.5)
+
+    t = Transform::Identity();
+    position_offset = Vector3d(0.03, 0.03, 0.015);
+    t.translate(position_offset);
+    t.scale(scale);
+    transform = t.matrix();
+
+    tetMesh.load_triMesh(assets_dir + "triMesh/body4/postcvpr_big_body_0.obj", transform, 2);
+    tetMesh.load_animation(assets_dir + "triMesh/body4/postcvpr_big_body_0.obj", transform);
+    // no gravity
+    //for(int i = 0; i < tetMesh.vertexes.size(); i++)
+    //{
+    //    tetMesh.apply_gravity[i] = 0;
+    //}
+
+    //const double eps = 1e-4;
+    //for(int i = 0; i < tetMesh.vertexNum; i++)
+    //{
+    //    if(tetMesh.vertexes[i].x < -0.5 + eps || tetMesh.vertexes[i].x > 0.5 - eps)
+    //    {
+    //        tetMesh.targetIndex.push_back(i);
+    //        tetMesh.targetPos.push_back(tetMesh.vertexes[i]);
+    //    }
+    //}
+    tetMesh.softNum = tetMesh.targetIndex.size();
+    ipc.animation   = true;
+    //std::cout << "soft constraint num: " << tetMesh.softNum << std::endl;
+    ipc.softMotionRate = 1e5;
+
+    //const double angular_vel = 3.14159265358979323846 / 5;
+    //d_tetMesh.update_soft_constraint_functor =
+    //    [angular_vel](double3 vertex, int step_id, double ipc_dt) -> double3
+    //{
+    //    double3 rotated_vertex = vertex;
+    //    if(vertex.x < 0)
+    //    {
+    //        // rotate along x axis clockwise
+    //        rotated_vertex = {vertex.x,
+    //                          vertex.y * std::cos(angular_vel * ipc_dt)
+    //                              - vertex.z * std::sin(angular_vel * ipc_dt),
+    //                          vertex.y * std::sin(angular_vel * ipc_dt)
+    //                              + vertex.z * std::cos(angular_vel * ipc_dt)};
+    //    }
+    //    if(vertex.x > 0)
+    //    {
+    //        // rotate along x axis counterclockwise
+    //        rotated_vertex = {vertex.x,
+    //                          vertex.y * std::cos(-angular_vel * ipc_dt)
+    //                              - vertex.z * std::sin(-angular_vel * ipc_dt),
+    //                          vertex.y * std::sin(-angular_vel * ipc_dt)
+    //                              + vertex.z * std::cos(-angular_vel * ipc_dt)};
+    //    }
+    //    return rotated_vertex;
+    //};
+}
+
+
 void setMAS_partition()
 {
     tetMesh.partId_map_real.resize(tetMesh.part_offset * BANKSIZE, -1);
@@ -1092,7 +1179,7 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 1;
+    int scene_no = 6;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1115,6 +1202,9 @@ void initScene()
             break;
         case 5:  //box pipe large scale and cloth
             set_case6();
+            break;
+        case 6:  //box pipe large scale and cloth
+            set_case7();
             break;
     }
 
@@ -1505,10 +1595,19 @@ void display(void)
 
     if(ipc.animation && true)
     {
-        std::string filename =
-            "triMesh/body4/postcvpr_big_body_" + std::to_string(frameId + 1) + ".obj";
+        std::string filename = assets_dir + "triMesh/body4/postcvpr_big_body_"
+                               + std::to_string(frameId + 1) + ".obj";
         frameId++;
-        tetMesh.load_animation(filename, 1, make_double3(-1, -0.5, -0.5));
+
+
+        Vector3d position_offset{0.03, 0.03, 0.015};
+        using Transform = Eigen::Transform<double, 3, Eigen::Affine>;
+        Transform t     = Transform::Identity();
+        t.translate(position_offset);
+        t.scale(1);
+        Eigen::Matrix4d transform = t.matrix();
+
+        tetMesh.load_animation(filename, transform);
         CUDA_SAFE_CALL(cudaMemcpy(d_tetMesh.targetVert,
                                   tetMesh.targetPos.data(),
                                   tetMesh.softNum * sizeof(double3),
@@ -1525,6 +1624,14 @@ void display(void)
                               ipc.vertexNum * sizeof(double3),
                               cudaMemcpyDeviceToHost));
 
+
+    if(saveSurface)
+    {
+        std::stringstream ss;
+        ss << "step_";
+        std::string file_path = ss.str();
+        saveSurfaceMesh(output_path+file_path);
+    }
 
     if(screenshot)
     {

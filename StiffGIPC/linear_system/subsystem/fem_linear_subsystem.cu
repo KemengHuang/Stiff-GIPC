@@ -71,7 +71,7 @@ void FEMLinearSubsystem::assemble(DenseVectorView gradient)
                 btype = boundary_type().cviewer().name("boundary_type"),
                 gradient = gradient.viewer().name("gradient")] __device__(int i) mutable
                {
-                   if(btype(i) != 0)
+                   if(btype(i) != 0 && btype(i) != 2)
                    {
                        gradient.segment<3>(i * 3).as_eigen() = Vector3::Zero();
                    }

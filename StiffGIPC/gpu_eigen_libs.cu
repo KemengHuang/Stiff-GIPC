@@ -1339,6 +1339,9 @@ __device__ __host__ void __Inverse(const Matrix3x3d& input, Matrix3x3d& result)
     }
 }
 
+
+
+
 __device__ __host__ void __Inverse2x2(const Matrix2x2d& input, Matrix2x2d& result)
 {
     double    eps = 1e-15;
