@@ -10,7 +10,7 @@
 #include "math.h"
 #include <stdio.h>
 #include <unsupported/Eigen/KroneckerProduct>
-#define arap_model 3;
+#define arap_model 4
 template <int ROWS, int COLS>
 __device__ inline void write_triplet_fem(Eigen::Matrix3d* triplet_value,
                                          int*             row_ids,
@@ -1102,12 +1102,15 @@ __device__ double __cal_ARAPX_energy_3D(const double3* vertexes,
     double T3          = (A * A * A).trace();
     double volume_term = volume_stiff / 2.0 * (J - 1.0) * (J - 1.0);
 
-#if arap_model == 2
+#if (arap_model == 2)
     energy = mu / 2.0 * T2 + volume_term;
-#elif arap_model == 3
+    //printf("2\n");
+#elif (arap_model == 3)
     energy = mu / 2.0 * T2 + mu / 6.0 * T3 + volume_term;
-#elif arap_model == 4
+    //printf("3\n");
+#elif (arap_model == 4)
     energy = mu / 2.0 * T2 + mu / 6.0 * T3 + lambda_ / 2.0 * std::pow(T2, 2.0) + volume_term;
+    //printf("4\n");
 #endif
     return energy * volume;
 }

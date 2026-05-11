@@ -3126,7 +3126,7 @@ __global__ void _calBarrierGradientAndHessian(const double3*   _vertexes,
     double dHat_sqrt = sqrt(dHat);
     //double dHat = dHat_sqrt * dHat_sqrt;
     //double Kappa = 1;
-    double gassThreshold = 1e-2;
+    double gassThreshold = 1e-6;
     if(MMCVIDI.x >= 0)
     {
         if(MMCVIDI.w >= 0)
@@ -10737,8 +10737,8 @@ bool GIPC::lineSearch(device_TetraData& TetMesh, double& alpha, const double& cf
 
     while((testingE > lastEnergyVal + c1m * alpha) && numOfLineSearch <= report_line_search_threshold)
     {
-        //std::cout << "[" << numOfLineSearch << "]   testE:    " << testingE
-        //          << "      lastEnergyVal:        " << lastEnergyVal << std::endl;
+        std::cout << "[" << numOfLineSearch << "]   testE:    " << testingE
+                  << "      lastEnergyVal:        " << lastEnergyVal << std::endl;
         alpha /= 2.0;
         ++numOfLineSearch;
 

@@ -194,9 +194,9 @@ void saveSurfaceMesh(const string& path)
 {
     std::stringstream ss;
     ss << path;
-    ss.fill('0');
-    ss.width(5);
-    ss << (surfNumId++) / 1;  // / 10;
+    //ss.fill('0');
+    //ss.width(5);
+    //ss << (surfNumId++) / 1;  // / 10;
     //if (surfNumId % 10 != 0) return;
     ss << ".obj";
     std::string file_path = ss.str();
@@ -612,8 +612,8 @@ void initFEM(tetrahedra_obj& mesh)
         double lengthRate = 4 * lengthRateLame / 3;
         double volumeRate = volumeRateLame + 5 * lengthRateLame / 6;
 
-        mesh.lengthRate.push_back(lengthRate);
-        mesh.volumeRate.push_back(volumeRate);
+        mesh.lengthRate.push_back(lengthRate * 0.3);
+        mesh.volumeRate.push_back(volumeRate * 0.005);
     }
 
     for(int i = 0; i < mesh.triangles.size(); i++)
@@ -1061,7 +1061,7 @@ void set_case6()
 
 void set_case7()
 {
-    ipc.pcg_data.P_type = 0;
+    ipc.pcg_data.P_type = 1;
 
     gipc::SimpleSceneImporter importer;
     double                    scale = 1.0;
@@ -1074,11 +1074,11 @@ void set_case7()
     t.scale(1.03);
     Eigen::Matrix4d transform = t.matrix();
 
-    string mesh_path       = assets_dir + "tetMesh/cvpr_1.msh";
+    string mesh_path       = assets_dir + "triMesh/postcvpr_big_cloth_fix.obj";
     double Youngth_Modulus = 1e5;
-    ipc.PoissonRate        = 0.35;
+    //ipc.PoissonRate        = 0.49;
     importer.load_geometry(tetMesh,
-                           3,
+                           2,
                            gipc::BodyType::FEM,
                            transform,
                            Youngth_Modulus,
@@ -1115,7 +1115,7 @@ void set_case7()
     tetMesh.softNum = tetMesh.targetIndex.size();
     ipc.animation   = true;
     //std::cout << "soft constraint num: " << tetMesh.softNum << std::endl;
-    ipc.softMotionRate = 1e5;
+    //ipc.softMotionRate = 1e3;
 
     //const double angular_vel = 3.14159265358979323846 / 5;
     //d_tetMesh.update_soft_constraint_functor =
@@ -1578,6 +1578,7 @@ void outputAnimationMeshInfo(string pathCloth, string pathBody)
     surfNumId++;
 }
 bool pri = true;
+int  animation_frame = 0;
 void display(void)
 {
     draw_Scene3D();
@@ -1596,9 +1597,12 @@ void display(void)
     if(ipc.animation && true)
     {
         std::string filename = assets_dir + "triMesh/body4/postcvpr_big_body_"
-                               + std::to_string(frameId + 1) + ".obj";
+                               + std::to_string(animation_frame) + ".obj";
         frameId++;
-
+        if(frameId >= 10)
+        {
+            animation_frame++;
+        }
 
         Vector3d position_offset{0.03, 0.03, 0.015};
         using Transform = Eigen::Transform<double, 3, Eigen::Affine>;
@@ -1629,6 +1633,9 @@ void display(void)
     {
         std::stringstream ss;
         ss << "step_";
+        ss.fill('0');
+        ss.width(5);
+        ss << animation_frame;  // / 10;
         std::string file_path = ss.str();
         saveSurfaceMesh(output_path+file_path);
     }
