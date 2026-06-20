@@ -1,13 +1,8 @@
 #include <cub/warp/warp_reduce.cuh>
-#include <muda/ext/eigen/atomic.h>
-namespace muda
-{
-//constexpr int BlockSize = 128;
-//constexpr int WarpSize  = 32;
-//using T                 = float;
-//constexpr int M         = 3;
-//constexpr int N         = 3;
+#include <gipc/cuda/all.h>
 
+namespace gipc::cuda
+{
 namespace details::fast_segmental_reduce
 {
     __host__ __device__ constexpr int b2i(bool b)
@@ -33,15 +28,12 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(int       length,
 
     auto                   size       = length;
     constexpr int          warp_size  = WarpSize;
-    constexpr unsigned int warp_mask  = ~0u;
     constexpr int          block_dim  = BlockSize;
     constexpr int          warp_count = block_dim / warp_size;
 
-    //BufferLaunch(this->stream()).fill<Matrix>(out, Matrix::Zero().eval());
-
     int block_count = (size + block_dim - 1) / block_dim;
 
-    ParallelFor()
+    ParallelFor(block_dim, 0, this->stream())
         .kernel_name(__FUNCTION__)
         .apply(size,
                [in = input,
@@ -86,10 +78,8 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(int       length,
 
                    if(is_head)
                    {
-                       //auto& out_value = out(i);
                        eigen::atomic_add(out[i], value);
                    }
-                   //}
                });
 }
 
@@ -109,15 +99,14 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(CBufferView<int> offset,
 
     auto                   size       = in.size();
     constexpr int          warp_size  = WarpSize;
-    constexpr unsigned int warp_mask  = ~0u;
     constexpr int          block_dim  = BlockSize;
     constexpr int          warp_count = block_dim / warp_size;
 
-    BufferLaunch(this->stream()).fill<Matrix>(out, Matrix::Zero().eval());
+    BufferLaunch(this->stream()).fill(out, Matrix::Zero().eval());
 
     int block_count = (size + block_dim - 1) / block_dim;
 
-    ParallelFor()
+    ParallelFor(block_dim, 0, this->stream())
         .kernel_name(__FUNCTION__)
         .apply(size,
                [in     = in.cviewer().name("in"),
@@ -165,9 +154,9 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(CBufferView<int> offset,
                        auto& out_value = out(i);
                        eigen::atomic_add(out_value, value);
                    }
-                   //}
                });
 }
+
 template <int BlockSize, int WarpSize>
 template <typename T, typename ReduceOp>
 void FastSegmentalReduce<BlockSize, WarpSize>::reduce(CBufferView<int> offset,
@@ -183,14 +172,13 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(CBufferView<int> offset,
 
     auto                   size       = in.size();
     constexpr int          warp_size  = WarpSize;
-    constexpr unsigned int warp_mask  = ~0u;
     constexpr int          block_dim  = BlockSize;
     constexpr int          warp_count = block_dim / warp_size;
 
-    BufferLaunch(this->stream()).fill<ValueT>(out, ValueT{0});
+    BufferLaunch(this->stream()).fill(out, ValueT{0});
 
     int block_count = (size + block_dim - 1) / block_dim;
-    ParallelFor()
+    ParallelFor(block_dim, 0, this->stream())
         .kernel_name(__FUNCTION__)
         .apply(size,
                [in     = in.cviewer().name("in"),
@@ -239,4 +227,4 @@ void FastSegmentalReduce<BlockSize, WarpSize>::reduce(CBufferView<int> offset,
                    }
                });
 }
-}  // namespace muda
+}  // namespace gipc::cuda

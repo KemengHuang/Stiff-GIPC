@@ -1,17 +1,17 @@
 #include <abd_system/abd_system.h>
-#include <muda/launch/parallel_for.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/parallel_algorithm/transform.h>
 #include <gipc/utils/parallel_algorithm/scatter.h>
-#include <muda/atomic.h>
+#include <gipc/cuda/all.h>
 #include <Eigen/Dense>
 #include <gipc/utils/print_buffer.h>
 #include <gipc/utils/math.h>
 #include <abd_system/abd_sim_data.h>
-#include <muda/ext/eigen/atomic.h>
-#include <muda/ext/eigen/svd.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
 #include <abd_system/abd_energy.h>
 #include <gipc/tet_local_info.h>
-#include <muda/ext/eigen.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/host_log.h>
 
 namespace gipc
@@ -28,9 +28,9 @@ void ABDSystem::rebuild_system(ABDSimData& sim_data)
     _setup_system(false, sim_data);
 }
 
-void ABDSystem::rebuild_system(ABDSimData& sim_data, muda::CBufferView<double3> vertices)
+void ABDSystem::rebuild_system(ABDSimData& sim_data, gipc::cuda::CBufferView<double3> vertices)
 {
-    using namespace muda::parallel;
+    using namespace gipc::cuda::parallel;
 
     //Transform()
     //    .kernel_name(__FUNCTION__)
@@ -139,13 +139,13 @@ void ABDSystem::_setup_system(bool init, ABDSimData& data)
 }
 
 void ABDSystem::_setup_unique_point_mass(size_t unique_point_count,
-                                         muda::DeviceBuffer<Float>& unique_point_mass,
-                                         muda::CBufferView<TetLocalInfo> tets,
-                                         muda::CBufferView<Float> tet_volumes,
+                                         gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
+                                         gipc::cuda::CBufferView<TetLocalInfo> tets,
+                                         gipc::cuda::CBufferView<Float> tet_volumes,
                                          Float                    density,
-                                         muda::CBufferView<int> point_id_to_unique_point_id)
+                                         gipc::cuda::CBufferView<int> point_id_to_unique_point_id)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     unique_point_mass.resize(unique_point_count, 0);
     ParallelFor()
@@ -170,12 +170,12 @@ void ABDSystem::_setup_unique_point_mass(size_t unique_point_count,
 }
 
 void ABDSystem::_calculate_body_mass_center(size_t body_count,
-                                            muda::DeviceBuffer<Float>& unique_point_mass,
-                                            muda::CBufferView<double3> unique_point_position,
-                                            muda::CBufferView<int> unique_point_id_to_body_id)
+                                            gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
+                                            gipc::cuda::CBufferView<double3> unique_point_position,
+                                            gipc::cuda::CBufferView<int> unique_point_id_to_body_id)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     body_mass.resize(body_count, 0);
     body_mass_center.resize(body_count, Vector3::Zero());
 
@@ -220,13 +220,13 @@ void ABDSystem::_calculate_body_mass_center(size_t body_count,
         });
 }
 
-void ABDSystem::_setup_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
-                         muda::CBufferView<double3>     unique_point_position,
-                         muda::CBufferView<int>      unique_point_id_to_body_id,
-                         muda::CBufferView<Vector12> q)
+void ABDSystem::_setup_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
+                         gipc::cuda::CBufferView<double3>     unique_point_position,
+                         gipc::cuda::CBufferView<int>      unique_point_id_to_body_id,
+                         gipc::cuda::CBufferView<Vector12> q)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     jacobi.resize(unique_point_id_to_body_id.size());
     ParallelFor()
         .kernel_name(__FUNCTION__)
@@ -244,22 +244,22 @@ void ABDSystem::_setup_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
                    auto A = q_to_A(q_i);
                    auto p = q_i.segment<3>(0);
 
-                   Vector3 pos0 = muda::eigen::inverse(A) * (pos - p);
+                   Vector3 pos0 = gipc::cuda::eigen::inverse(A) * (pos - p);
 
                    J(i) = ABDJacobi{pos0};
                });
 }
 
 void ABDSystem::_setup_abd_state(size_t                        abd_count,
-                                 muda::DeviceBuffer<Vector12>& q,
-                                 muda::DeviceBuffer<Vector12>& q_temp,
-                                 muda::DeviceBuffer<Vector12>& q_tilde,
-                                 muda::DeviceBuffer<Vector12>& q_prev,
-                                 muda::DeviceBuffer<Vector12>& q_v,
-                                 muda::DeviceBuffer<Vector12>& dq)
+                                 gipc::cuda::DeviceBuffer<Vector12>& q,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_temp,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_prev,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_v,
+                                 gipc::cuda::DeviceBuffer<Vector12>& dq)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
 
     q.resize(abd_count, Vector12::Zero());
     q_v.resize(abd_count, Vector12::Zero());
@@ -360,7 +360,7 @@ MUDA_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
 
     Matrix3x3 U, V;
     Vector3   sig;
-    muda::eigen::svd(F, U, sig, V);
+    gipc::cuda::eigen::svd(F, U, sig, V);
 
     double f = sig.sum();
 
@@ -440,17 +440,17 @@ MUDA_GENERIC Matrix3x3 ddot(const Matrix9x9& DRDF, const Matrix3x3& F_prime)
 }
 
 
-void ABDSystem::_spawn_abd_state(muda::CBufferView<int> body_id_to_old_body_id,
-                                 muda::DeviceBuffer<int>& body_id_to_is_fixed,
-                                 muda::DeviceBuffer<Vector12>& q,
-                                 muda::DeviceBuffer<Vector12>& q_temp,
-                                 muda::DeviceBuffer<Vector12>& q_tilde,
-                                 muda::DeviceBuffer<Vector12>& q_prev,
-                                 muda::DeviceBuffer<Vector12>& q_v,
-                                 muda::DeviceBuffer<Vector12>& dq)
+void ABDSystem::_spawn_abd_state(gipc::cuda::CBufferView<int> body_id_to_old_body_id,
+                                 gipc::cuda::DeviceBuffer<int>& body_id_to_is_fixed,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_temp,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_prev,
+                                 gipc::cuda::DeviceBuffer<Vector12>& q_v,
+                                 gipc::cuda::DeviceBuffer<Vector12>& dq)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     auto new_abd_count = body_id_to_old_body_id.size();
     // spawn the q, because the q will be used in integration in next frame
     // spawn the q_v, because the q_v will be used in integration in next frame
@@ -504,11 +504,11 @@ void ABDSystem::_spawn_abd_state(muda::CBufferView<int> body_id_to_old_body_id,
     dq.resize(new_abd_count, Vector12::Zero());
 }
 
-void ABDSystem::_spawn_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
-                         muda::CBufferView<int> unique_point_to_old_unique_point)
+void ABDSystem::_spawn_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
+                         gipc::cuda::CBufferView<int> unique_point_to_old_unique_point)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
 
     //m_temp_jacobi.resize(unique_point_to_old_unique_point.size());
     //Transform()
@@ -524,14 +524,14 @@ void ABDSystem::_spawn_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
     //std::swap(jacobi, m_temp_jacobi);
 }
 
-void ABDSystem::_setup_tet_abd_mass(muda::CBufferView<TetLocalInfo> tet_local_info,
-                                    muda::CBufferView<int> point_id_to_unique_point_id,
-                                    muda::CBufferView<ABDJacobi> jacobi,
-                                    muda::CBufferView<Float>     tet_volumes,
+void ABDSystem::_setup_tet_abd_mass(gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
+                                    gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
+                                    gipc::cuda::CBufferView<ABDJacobi> jacobi,
+                                    gipc::cuda::CBufferView<Float>     tet_volumes,
                                     Float                        density,
-                                    muda::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass)
+                                    gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass)
 {
-    using namespace muda::parallel;
+    using namespace gipc::cuda::parallel;
     tet_dyadic_mass.resize(tet_local_info.size());
     Transform()
         .kernel_name(__FUNCTION__)
@@ -559,13 +559,13 @@ void ABDSystem::_setup_tet_abd_mass(muda::CBufferView<TetLocalInfo> tet_local_in
 }
 
 void ABDSystem::_setup_abd_dyadic_mass(size_t affine_body_count,
-                                       muda::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
-                                       muda::CBufferView<int> tet_id_to_body_id,
-                                       muda::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
-                                       muda::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv)
+                                       gipc::cuda::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
+                                       gipc::cuda::CBufferView<int> tet_id_to_body_id,
+                                       gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
+                                       gipc::cuda::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     abd_dyadic_mass.resize(affine_body_count, ABDJacobiDyadicMass::zero());
     // TODO: maybe we can use a parallel reduce here
     ParallelFor()
@@ -596,12 +596,12 @@ void ABDSystem::_setup_abd_dyadic_mass(size_t affine_body_count,
 }
 
 void ABDSystem::_setup_abd_volume(size_t                     affine_body_count,
-                                  muda::CBufferView<int>     tet_id_to_body_id,
-                                  muda::CBufferView<Float>   tet_volumes,
-                                  muda::DeviceBuffer<Float>& abd_volume)
+                                  gipc::cuda::CBufferView<int>     tet_id_to_body_id,
+                                  gipc::cuda::CBufferView<Float>   tet_volumes,
+                                  gipc::cuda::DeviceBuffer<Float>& abd_volume)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     abd_volume.resize(affine_body_count, 0);
     ParallelFor()
         .kernel_name(__FUNCTION__)
@@ -612,19 +612,19 @@ void ABDSystem::_setup_abd_volume(size_t                     affine_body_count,
                {
                    auto body_id = tet_id_to_body_id(i);
                    auto volume  = tet_volumes(i);
-                   muda::atomic_add(&abd_volume(body_id), volume);
+                   gipc::cuda::atomic_add(&abd_volume(body_id), volume);
                });
 }
 
 void ABDSystem::_setup_tet_abd_gravity_force(const Vector3& gravity,
-                                             muda::CBufferView<TetLocalInfo> tet_local_info,
-                                             muda::CBufferView<int> point_id_to_unique_point_id,
-                                             muda::CBufferView<ABDJacobi> jacobi,
-                                             muda::CBufferView<Float> tet_volumes,
+                                             gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
+                                             gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
+                                             gipc::cuda::CBufferView<ABDJacobi> jacobi,
+                                             gipc::cuda::CBufferView<Float> tet_volumes,
                                              Float density,
-                                             muda::DeviceBuffer<Vector12>& tet_abd_gravity_force)
+                                             gipc::cuda::DeviceBuffer<Vector12>& tet_abd_gravity_force)
 {
-    using namespace muda::parallel;
+    using namespace gipc::cuda::parallel;
     tet_abd_gravity_force.resize(tet_local_info.size());
     Transform()
         .kernel_name(__FUNCTION__)
@@ -653,14 +653,14 @@ void ABDSystem::_setup_tet_abd_gravity_force(const Vector3& gravity,
                    });
 }
 
-void ABDSystem::_setup_abd_gravity(muda::CBufferView<Vector12> tet_abd_gravity_force,
-                                   muda::CBufferView<int> tet_id_to_body_id,
+void ABDSystem::_setup_abd_gravity(gipc::cuda::CBufferView<Vector12> tet_abd_gravity_force,
+                                   gipc::cuda::CBufferView<int> tet_id_to_body_id,
                                    size_t                 affine_body_count,
-                                   muda::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
-                                   muda::DeviceBuffer<Vector12>& abd_gravity)
+                                   gipc::cuda::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
+                                   gipc::cuda::DeviceBuffer<Vector12>& abd_gravity)
 {
-    using namespace muda;
-    using namespace muda::parallel;
+    using namespace gipc::cuda;
+    using namespace gipc::cuda::parallel;
     m_temp_abd_gravity_force.resize(affine_body_count, Vector12::Zero());
 
     // TODO: maybe we can use a parallel reduce here
@@ -677,7 +677,7 @@ void ABDSystem::_setup_abd_gravity(muda::CBufferView<Vector12> tet_abd_gravity_f
                    auto&    dst     = abd_gravity_force(body_id);
                    Vector12 src     = tet_abd_gravity_force(i);
 
-                   muda::eigen::atomic_add(dst, src);
+                   gipc::cuda::eigen::atomic_add(dst, src);
                });
 
     abd_gravity.resize(affine_body_count);

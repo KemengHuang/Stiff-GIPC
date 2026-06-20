@@ -1,9 +1,9 @@
 #pragma once
 #include <gipc/type_define.h>
-#include <muda/ext/linear_system/doublet_vector_view.h>
-#include <muda/ext/linear_system/triplet_matrix_view.h>
-#include <muda/ext/linear_system/dense_vector_view.h>
-#include <muda/ext/linear_system/linear_system_context.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/json.h>
 
 namespace gipc
@@ -14,8 +14,8 @@ class DiagonalSubsystem;
 class ILinearSubsystem
 {
   public:
-    using DenseVectorView   = muda::DenseVectorView<Float>;
-    using CDenseVectorView  = muda::CDenseVectorView<Float>;
+    using DenseVectorView   = gipc::cuda::DenseVectorView<Float>;
+    using CDenseVectorView  = gipc::cuda::CDenseVectorView<Float>;
 
   private:
     IndexT m_hid            = 0;  // ID for the hessian block
@@ -52,7 +52,7 @@ class ILinearSubsystem
      * \brief report subsystem information 
      */
     virtual void               report_subsystem_info() = 0;
-    muda::LinearSystemContext& ctx() const;
+    gipc::cuda::LinearSystemContext& ctx() const;
 
   private:
     

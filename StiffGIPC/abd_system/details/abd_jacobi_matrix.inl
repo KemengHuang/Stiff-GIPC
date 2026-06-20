@@ -1,4 +1,4 @@
-#include <muda/ext/eigen/atomic.h>
+#include <gipc/cuda/all.h>
 namespace gipc
 {
 MUDA_INLINE MUDA_GENERIC Vector12 operator*(const ABDJacobi::ABDJacobiT& j, const Vector3& g)
@@ -179,11 +179,11 @@ inline MUDA_DEVICE ABDJacobiDyadicMass gipc::ABDJacobiDyadicMass::atomic_add(
     ABDJacobiDyadicMass& dst, const ABDJacobiDyadicMass& src)
 {
     ABDJacobiDyadicMass ret;
-    auto                mass = muda::atomic_add(&dst.m_mass, src.m_mass);
+    auto                mass = gipc::cuda::atomic_add(&dst.m_mass, src.m_mass);
     auto                mass_times_x_bar =
-        muda::eigen::atomic_add(dst.m_mass_times_x_bar, src.m_mass_times_x_bar);
+        gipc::cuda::eigen::atomic_add(dst.m_mass_times_x_bar, src.m_mass_times_x_bar);
     auto mass_times_dyadic_x_bar =
-        muda::eigen::atomic_add(dst.m_mass_times_dyadic_x_bar, src.m_mass_times_dyadic_x_bar);
+        gipc::cuda::eigen::atomic_add(dst.m_mass_times_dyadic_x_bar, src.m_mass_times_dyadic_x_bar);
     ret.m_mass                    = mass;
     ret.m_mass_times_x_bar        = mass_times_x_bar;
     ret.m_mass_times_dyadic_x_bar = mass_times_dyadic_x_bar;

@@ -1,5 +1,5 @@
 #pragma once
-#include <muda/buffer/device_buffer.h>
+#include <gipc/cuda/all.h>
 #include <abd_system/abd_jacobi_matrix.h>
 #include <gipc/abd_fem_count_info.h>
 #include <gipc/tet_local_info.h>
@@ -22,7 +22,7 @@ class ABDSimData
     void upload();
 
     template <typename T>
-    using DeviceBuffer = muda::DeviceBuffer<T>;
+    using DeviceBuffer = gipc::cuda::DeviceBuffer<T>;
 
     /*************************************************************************************************************
     *                                            Control Parameters
@@ -155,16 +155,16 @@ class ABDSimData
         DeviceBuffer<Vector12> body_id_to_abd_gravity;
     } device;
 
-    muda::CBufferView<double3>          unique_point_id_to_position() const;
-    muda::CBufferView<I32>              unique_point_id_to_body_id() const;
-    muda::CBufferView<Float>            tet_id_to_volume() const;
-    muda::CBufferView<I32>              point_id_to_unique_point_id() const;
-    muda::CBufferView<TetLocalInfo>     tet_info() const;
-    muda::CBufferView<I32>              tet_id_to_body_id() const;
-    muda::CBufferView<BodyBoundaryType> body_id_to_boundary_type() const;
+    gipc::cuda::CBufferView<double3>          unique_point_id_to_position() const;
+    gipc::cuda::CBufferView<I32>              unique_point_id_to_body_id() const;
+    gipc::cuda::CBufferView<Float>            tet_id_to_volume() const;
+    gipc::cuda::CBufferView<I32>              point_id_to_unique_point_id() const;
+    gipc::cuda::CBufferView<TetLocalInfo>     tet_info() const;
+    gipc::cuda::CBufferView<I32>              tet_id_to_body_id() const;
+    gipc::cuda::CBufferView<BodyBoundaryType> body_id_to_boundary_type() const;
 
   private:
-    muda::DeviceBuffer<I32>          m_point_id_to_unique_point_id;
-    muda::DeviceBuffer<TetLocalInfo> m_tet_info;
+    gipc::cuda::DeviceBuffer<I32>          m_point_id_to_unique_point_id;
+    gipc::cuda::DeviceBuffer<TetLocalInfo> m_tet_info;
 };
 }  // namespace gipc

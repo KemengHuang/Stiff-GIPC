@@ -1,7 +1,7 @@
 #include <linear_system/linear_system/i_preconditioner.h>
 #include <linear_system/linear_system/linear_subsystem.h>
 #include <linear_system/linear_system/global_linear_system.h>
-#include <muda/cub/device/device_select.h>
+#include <gipc/cuda/all.h>
 
 namespace gipc
 {
@@ -14,7 +14,7 @@ Json IPreconditioner::as_json() const
     return j;
 }
 
-muda::LinearSystemContext& IPreconditioner::ctx() const
+gipc::cuda::LinearSystemContext& IPreconditioner::ctx() const
 {
     return m_system->m_context;
 }
@@ -37,7 +37,7 @@ uint32_t* LocalPreconditioner::calculate_subsystem_bcoo_indices(int& number) con
     auto index_input  = m_system->gipc_global_triplet->block_index();
     auto index_output = m_system->gipc_global_triplet->block_sort_index();
     auto flags        = m_system->gipc_global_triplet->block_temp_buffer();
-    muda::ParallelFor()
+    gipc::cuda::ParallelFor()
         .kernel_name(__FUNCTION__)
         .apply(m_system->gipc_global_triplet->h_unique_key_number,
                [rows   = m_system->gipc_global_triplet->block_row_indices(),
@@ -56,7 +56,7 @@ uint32_t* LocalPreconditioner::calculate_subsystem_bcoo_indices(int& number) con
                    flags[I]         = valid ? 1 : 0;
                });
 
-    muda::DeviceSelect().Flagged(
+    gipc::cuda::DeviceSelect().Flagged(
         index_input,
         flags,
         index_output,
@@ -87,8 +87,8 @@ int* LocalPreconditioner::system_bcoo_cols() const
     return m_system->gipc_global_triplet->block_col_indices();
 }
 
-void LocalPreconditioner::do_apply(muda::CDenseVectorView<Float> r,
-                                   muda::DenseVectorView<Float>  z)
+void LocalPreconditioner::do_apply(gipc::cuda::CDenseVectorView<Float> r,
+                                   gipc::cuda::DenseVectorView<Float>  z)
 {
     auto dof_offset = m_subsystem->dof_offset()[0];
     auto dof_count  = m_subsystem->right_hand_side_dof();
@@ -103,8 +103,8 @@ void LocalPreconditioner::do_assemble(GIPCTripletMatrix& global_triplets)
 
 
 
-void GlobalPreconditioner::do_apply(muda::CDenseVectorView<Float> r,
-                                    muda::DenseVectorView<Float>  z)
+void GlobalPreconditioner::do_apply(gipc::cuda::CDenseVectorView<Float> r,
+                                    gipc::cuda::DenseVectorView<Float>  z)
 {
     apply(r, z);
 }

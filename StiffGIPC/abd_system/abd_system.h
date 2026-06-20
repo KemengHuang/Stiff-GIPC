@@ -1,7 +1,7 @@
 #pragma once
 #include <abd_system/abd_sim_data.h>
-#include <muda/buffer/device_var.h>
-#include <muda/ext/linear_system.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
 #include <abd_system/abd_system_parms.h>
 #include <linear_system/utils/converter.h>
 #include "linear_system/linear_system/global_matrix.h"
@@ -10,43 +10,43 @@ namespace gipc
 class ABDSystem
 {
   private:
-    muda::DeviceBuffer<Vector12>  m_temp_q;
-    muda::DeviceBuffer<Vector12>  m_temp_q_v;
-    muda::DeviceBuffer<Vector12>  m_temp_q_prev;
-    muda::DeviceBuffer<Vector12>  m_temp_q_tilde;
-    muda::DeviceBuffer<int>       m_temp_is_fixed;
-    muda::DeviceBuffer<ABDJacobi> m_temp_jacobi;
-    muda::DeviceBuffer<Vector12>  m_temp_abd_gravity_force;
-    muda::DeviceVar<Float>        m_kinetic_energy;
-    muda::DeviceBuffer<Float>     m_kinetic_energy_per_affine_body;
+    gipc::cuda::DeviceBuffer<Vector12>  m_temp_q;
+    gipc::cuda::DeviceBuffer<Vector12>  m_temp_q_v;
+    gipc::cuda::DeviceBuffer<Vector12>  m_temp_q_prev;
+    gipc::cuda::DeviceBuffer<Vector12>  m_temp_q_tilde;
+    gipc::cuda::DeviceBuffer<int>       m_temp_is_fixed;
+    gipc::cuda::DeviceBuffer<ABDJacobi> m_temp_jacobi;
+    gipc::cuda::DeviceBuffer<Vector12>  m_temp_abd_gravity_force;
+    gipc::cuda::DeviceVar<Float>        m_kinetic_energy;
+    gipc::cuda::DeviceBuffer<Float>     m_kinetic_energy_per_affine_body;
 
-    muda::DeviceVar<Float>      m_shape_energy;
-    muda::DeviceBuffer<Float>   m_shape_energy_per_affine_body;
-    muda::DeviceBuffer<Vector3> m_body_centered_positions;
+    gipc::cuda::DeviceVar<Float>      m_shape_energy;
+    gipc::cuda::DeviceBuffer<Float>   m_shape_energy_per_affine_body;
+    gipc::cuda::DeviceBuffer<Vector3> m_body_centered_positions;
 
     Float                     m_suggest_max_tolerance = 0.0f;
-    muda::DeviceBuffer<Float> m_local_tolerance;
-    muda::DeviceVar<Float>    m_local_tolerance_max;
+    gipc::cuda::DeviceBuffer<Float> m_local_tolerance;
+    gipc::cuda::DeviceVar<Float>    m_local_tolerance_max;
 
   public:  // public just for convenience
     int*                                  fem_boundary_type;
-    muda::DeviceBuffer<Vector12>          abd_gradient;  // just for legacy code
-    muda::DeviceBuffer<Matrix12x12>       abd_body_hessian;
+    gipc::cuda::DeviceBuffer<Vector12>          abd_gradient;  // just for legacy code
+    gipc::cuda::DeviceBuffer<Matrix12x12>       abd_body_hessian;
     GIPCTripletMatrix*   global_triplet;
-    muda::DeviceDenseMatrix<double>       dense_system_hessian;
-    muda::DeviceCSRMatrix<double>         csr_system_hessian;
-    muda::DeviceDenseVector<double>       system_gradient;
-    muda::DeviceDenseVector<double>       temp_system_gradient;
-    muda::DeviceDoubletVector<double, 12> doublet_system_gradient;
-    muda::DeviceBuffer<Matrix12x12>       abd_system_diag_preconditioner;
+    gipc::cuda::DeviceDenseMatrix<double>       dense_system_hessian;
+    gipc::cuda::DeviceCSRMatrix<double>         csr_system_hessian;
+    gipc::cuda::DeviceDenseVector<double>       system_gradient;
+    gipc::cuda::DeviceDenseVector<double>       temp_system_gradient;
+    gipc::cuda::DeviceDoubletVector<double, 12> doublet_system_gradient;
+    gipc::cuda::DeviceBuffer<Matrix12x12>       abd_system_diag_preconditioner;
 
-    muda::DeviceBuffer<Vector3> body_mass_center;
-    muda::DeviceBuffer<Float>   body_mass;
-    muda::DeviceBuffer<int>     body_unique_point_count;
+    gipc::cuda::DeviceBuffer<Vector3> body_mass_center;
+    gipc::cuda::DeviceBuffer<Float>   body_mass;
+    gipc::cuda::DeviceBuffer<int>     body_unique_point_count;
     // Vector6: [x0,x1,x2,x3,x4,x5]
     // Axis from [x0,x1,x2] to [x3,x4,x5]
     // Vector6 == Zero for non-motorized body
-    muda::DeviceBuffer<Vector6> body_id_to_motor_rotation_axis;
+    gipc::cuda::DeviceBuffer<Vector6> body_id_to_motor_rotation_axis;
     gipc::Converter             converter3x3;
 
     size_t triplet_vertex_hessian_reserve_size = 0;
@@ -70,85 +70,85 @@ class ABDSystem
     /// </summary>
     /// <param name="sim_data"></param>
     void rebuild_system(ABDSimData& sim_data);
-    void rebuild_system(ABDSimData& sim_data, muda::CBufferView<double3> vertices);
+    void rebuild_system(ABDSimData& sim_data, gipc::cuda::CBufferView<double3> vertices);
 
     // init == true, means we are at frame 0, just init the abd system
     // init == false, means we are at frame > 0, we need to rebuild the abd system
     void _setup_system(bool init, ABDSimData&);
 
     void _setup_unique_point_mass(size_t                     unique_point_count,
-                                  muda::DeviceBuffer<Float>& unique_point_mass,
-                                  muda::CBufferView<TetLocalInfo> tets,
-                                  muda::CBufferView<Float>        tet_volumes,
+                                  gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
+                                  gipc::cuda::CBufferView<TetLocalInfo> tets,
+                                  gipc::cuda::CBufferView<Float>        tet_volumes,
                                   Float                           density,
-                                  muda::CBufferView<int> point_id_to_unique_point_id);
+                                  gipc::cuda::CBufferView<int> point_id_to_unique_point_id);
 
     void _calculate_body_mass_center(size_t body_count,
-                                     muda::DeviceBuffer<Float>& unique_point_mass,
-                                     muda::CBufferView<double3> unique_point_position,
-                                     muda::CBufferView<int> unique_point_id_to_body_id);
+                                     gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
+                                     gipc::cuda::CBufferView<double3> unique_point_position,
+                                     gipc::cuda::CBufferView<int> unique_point_id_to_body_id);
 
 
     // setup at frame 0
-    void _setup_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
-                  muda::CBufferView<double3>     unique_point_position,
-                  muda::CBufferView<int>         unique_point_id_to_body_id,
-                  muda::CBufferView<Vector12>    q);
+    void _setup_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
+                  gipc::cuda::CBufferView<double3>     unique_point_position,
+                  gipc::cuda::CBufferView<int>         unique_point_id_to_body_id,
+                  gipc::cuda::CBufferView<Vector12>    q);
 
     void _setup_abd_state(size_t                        abd_count,
-                          muda::DeviceBuffer<Vector12>& q,
-                          muda::DeviceBuffer<Vector12>& q_temp,
-                          muda::DeviceBuffer<Vector12>& q_tilde,
-                          muda::DeviceBuffer<Vector12>& q_prev,
-                          muda::DeviceBuffer<Vector12>& q_v,
-                          muda::DeviceBuffer<Vector12>& dq);
+                          gipc::cuda::DeviceBuffer<Vector12>& q,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_temp,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_prev,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_v,
+                          gipc::cuda::DeviceBuffer<Vector12>& dq);
 
 
     // if body breakup happens, we need to spawn state
-    void _spawn_abd_state(muda::CBufferView<int>        body_id_to_old_body_id,
-                          muda::DeviceBuffer<int>&      body_id_to_is_fixed,
-                          muda::DeviceBuffer<Vector12>& q,
-                          muda::DeviceBuffer<Vector12>& q_temp,
-                          muda::DeviceBuffer<Vector12>& q_tilde,
-                          muda::DeviceBuffer<Vector12>& q_prev,
-                          muda::DeviceBuffer<Vector12>& q_v,
-                          muda::DeviceBuffer<Vector12>& dq);
+    void _spawn_abd_state(gipc::cuda::CBufferView<int>        body_id_to_old_body_id,
+                          gipc::cuda::DeviceBuffer<int>&      body_id_to_is_fixed,
+                          gipc::cuda::DeviceBuffer<Vector12>& q,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_temp,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_prev,
+                          gipc::cuda::DeviceBuffer<Vector12>& q_v,
+                          gipc::cuda::DeviceBuffer<Vector12>& dq);
     // if body breakup happens, we need to spawn J
-    void _spawn_J(muda::DeviceBuffer<ABDJacobi>& jacobi,
-                  muda::CBufferView<int> unique_point_to_old_unique_point);
+    void _spawn_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
+                  gipc::cuda::CBufferView<int> unique_point_to_old_unique_point);
 
 
-    void _setup_tet_abd_mass(muda::CBufferView<TetLocalInfo> tet_local_info,
-                             muda::CBufferView<int> point_id_to_unique_point_id,
-                             muda::CBufferView<ABDJacobi> jacobi,
-                             muda::CBufferView<Float>     tet_volumes,
+    void _setup_tet_abd_mass(gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
+                             gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
+                             gipc::cuda::CBufferView<ABDJacobi> jacobi,
+                             gipc::cuda::CBufferView<Float>     tet_volumes,
                              Float                        density,
-                             muda::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass);
+                             gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass);
 
     void _setup_abd_dyadic_mass(size_t affine_body_count,
-                                muda::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
-                                muda::CBufferView<int> tet_id_to_body_id,
-                                muda::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
-                                muda::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv);
+                                gipc::cuda::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
+                                gipc::cuda::CBufferView<int> tet_id_to_body_id,
+                                gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
+                                gipc::cuda::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv);
 
     void _setup_abd_volume(size_t                     affine_body_count,
-                           muda::CBufferView<int>     tet_id_to_body_id,
-                           muda::CBufferView<Float>   tet_volumes,
-                           muda::DeviceBuffer<Float>& abd_volume);
+                           gipc::cuda::CBufferView<int>     tet_id_to_body_id,
+                           gipc::cuda::CBufferView<Float>   tet_volumes,
+                           gipc::cuda::DeviceBuffer<Float>& abd_volume);
 
     void _setup_tet_abd_gravity_force(const Vector3& gravity,
-                                      muda::CBufferView<TetLocalInfo> tet_local_info,
-                                      muda::CBufferView<int> point_id_to_unique_point_id,
-                                      muda::CBufferView<ABDJacobi> jacobi,
-                                      muda::CBufferView<Float>     tet_volumes,
+                                      gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
+                                      gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
+                                      gipc::cuda::CBufferView<ABDJacobi> jacobi,
+                                      gipc::cuda::CBufferView<Float>     tet_volumes,
                                       Float                        density,
-                                      muda::DeviceBuffer<Vector12>& tet_abd_gravity_force);
+                                      gipc::cuda::DeviceBuffer<Vector12>& tet_abd_gravity_force);
 
-    void _setup_abd_gravity(muda::CBufferView<Vector12> tet_abd_gravity_force,
-                            muda::CBufferView<int>      tet_id_to_body_id,
+    void _setup_abd_gravity(gipc::cuda::CBufferView<Vector12> tet_abd_gravity_force,
+                            gipc::cuda::CBufferView<int>      tet_id_to_body_id,
                             size_t                      affine_body_count,
-                            muda::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
-                            muda::DeviceBuffer<Vector12>&  abd_gravity);
+                            gipc::cuda::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
+                            gipc::cuda::DeviceBuffer<Vector12>&  abd_gravity);
 
     /*******************************************************************************
     *                                 involution
@@ -164,10 +164,10 @@ class ABDSystem
     // calculate predicted position
     void cal_q_tilde(ABDSimData& sim_data);
     // mapping q to x
-    void cal_x_from_q(ABDSimData& sim_data, muda::BufferView<double3> vertices);
-    void cal_dx_from_dq(ABDSimData& sim_data, muda::BufferView<double3> move_dir);
-    void cal_x_from_q(ABDSimData& sim_data, muda::BufferView<Vector3> vertices);
-    void cal_dx_from_dq(ABDSimData& sim_data, muda::BufferView<Vector3> move_dir);
+    void cal_x_from_q(ABDSimData& sim_data, gipc::cuda::BufferView<double3> vertices);
+    void cal_dx_from_dq(ABDSimData& sim_data, gipc::cuda::BufferView<double3> move_dir);
+    void cal_x_from_q(ABDSimData& sim_data, gipc::cuda::BufferView<Vector3> vertices);
+    void cal_dx_from_dq(ABDSimData& sim_data, gipc::cuda::BufferView<Vector3> move_dir);
 
     /********************************************************************************/
 
@@ -179,20 +179,20 @@ class ABDSystem
     /// <param name="vertex_barrier_gradient"></param>
     void setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                            GIPCTripletMatrix& global_triplets,
-                                           muda::CBufferView<double3> vertex_barrier_gradient);
+                                           gipc::cuda::CBufferView<double3> vertex_barrier_gradient);
     void setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                            GIPCTripletMatrix& global_triplets,
-                                           muda::CBufferView<Vector3> vertex_barrier_gradient);
+                                           gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient);
     void setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                            int*        fbtype,
-                                           muda::CBufferView<double3> vertex_barrier_gradient,
+                                           gipc::cuda::CBufferView<double3> vertex_barrier_gradient,
                                            GIPCTripletMatrix& global_triplets);
 
     void _cal_abd_body_gradient_and_hessian(ABDSimData& sim_data);
     void _cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                          muda::CBufferView<double3> vertex_barrier_gradient);
+                                          gipc::cuda::CBufferView<double3> vertex_barrier_gradient);
     void _cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                          muda::CBufferView<Vector3> vertex_barrier_gradient);
+                                          gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient);
     void _setup_abd_system_hessian(ABDSimData& sim_data,
                                    GIPCTripletMatrix& global_triplets);
     void _cal_abd_system_preconditioner(ABDSimData& sim_data);
@@ -204,7 +204,7 @@ class ABDSystem
 
     // move forward to test the energy
     void step_forward(ABDSimData&                sim_data,
-                      muda::BufferView<double3>  vertices,
+                      gipc::cuda::BufferView<double3>  vertices,
                       double                     alpha);
 
     // when doing line search, we need calculate abd energy from q

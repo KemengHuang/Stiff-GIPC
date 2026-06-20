@@ -1,7 +1,7 @@
 #pragma once
 #include <list>
 #include <linear_system/linear_system/linear_subsystem.h>
-#include <muda/ext/linear_system.h>
+#include <gipc/cuda/all.h>
 
 namespace gipc
 {
@@ -40,19 +40,19 @@ class IterativeSolver
      * otherwise, return 0.
      * 
      */
-    virtual SizeT solve(muda::DenseVectorView<Float>  x,
-                        muda::CDenseVectorView<Float> b) = 0;
+    virtual SizeT solve(gipc::cuda::DenseVectorView<Float>  x,
+                        gipc::cuda::CDenseVectorView<Float> b) = 0;
 
-    void spmv(Float a, muda::CDenseVectorView<Float> x, Float b, muda::DenseVectorView<Float> y);
-    void spmv(muda::CDenseVectorView<Float> x, muda::DenseVectorView<Float> y)
+    void spmv(Float a, gipc::cuda::CDenseVectorView<Float> x, Float b, gipc::cuda::DenseVectorView<Float> y);
+    void spmv(gipc::cuda::CDenseVectorView<Float> x, gipc::cuda::DenseVectorView<Float> y)
     {
         spmv(1.0, x, 0.0, y);
     }
 
-    void apply_preconditioner(muda::DenseVectorView<Float>  z,
-                              muda::CDenseVectorView<Float> r) const;
+    void apply_preconditioner(gipc::cuda::DenseVectorView<Float>  z,
+                              gipc::cuda::CDenseVectorView<Float> r) const;
 
-    muda::LinearSystemContext& ctx() const;
+    gipc::cuda::LinearSystemContext& ctx() const;
 
   private:
     void system(GlobalLinearSystem& system) { m_system = &system; }

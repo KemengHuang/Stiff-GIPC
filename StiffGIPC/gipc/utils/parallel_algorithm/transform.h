@@ -1,7 +1,7 @@
 #pragma once
-#include <muda/buffer/buffer_view.h>
-#include <muda/launch/launch_base.h>
-namespace muda::parallel
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
+namespace gipc::cuda::parallel
 {
 class Transform : public LaunchBase<Transform>
 {
@@ -26,6 +26,6 @@ class Transform : public LaunchBase<Transform>
     template <typename T, typename F>
     void transform(BufferView<T> to, F&& f);
 };
-}  // namespace muda::parallel
+}  // namespace gipc::cuda::parallel
 
 #include "details/transform.inl"

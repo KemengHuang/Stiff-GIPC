@@ -17,7 +17,7 @@ class PCGSolverConfig
 
 class PCGSolver : public IterativeSolver
 {
-    using DeviceDenseVector = muda::DeviceDenseVector<Float>;
+    using DeviceDenseVector = gipc::cuda::DeviceDenseVector<Float>;
 
   public:
     PCGSolver(const PCGSolverConfig& cfg);
@@ -35,9 +35,9 @@ class PCGSolver : public IterativeSolver
     PCGSolverConfig   m_config;
 
   protected:
-    SizeT solve(muda::DenseVectorView<Float> x, muda::CDenseVectorView<Float> b) override;
+    SizeT solve(gipc::cuda::DenseVectorView<Float> x, gipc::cuda::CDenseVectorView<Float> b) override;
 
   private:
-    SizeT pcg(muda::DenseVectorView<Float> x, muda::CDenseVectorView<Float> b, SizeT max_iter);
+    SizeT pcg(gipc::cuda::DenseVectorView<Float> x, gipc::cuda::CDenseVectorView<Float> b, SizeT max_iter);
 };
 }  // namespace gipc

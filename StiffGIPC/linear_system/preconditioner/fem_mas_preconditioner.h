@@ -17,7 +17,7 @@ class MAS_Preconditioner : public LocalPreconditioner
   public:
     MAS_Preconditioner(FEMLinearSubsystem& subsystem, MASPreconditioner& mMAS, double* mMasses, uint32_t* mCpNum);
     virtual void assemble() override;
-    virtual void apply(muda::CDenseVectorView<Float> r, muda::DenseVectorView<Float> z) override;
+    virtual void apply(gipc::cuda::CDenseVectorView<Float> r, gipc::cuda::DenseVectorView<Float> z) override;
     //const int preconditioner_id = 1;
 };
 }  // namespace gipc

@@ -1,5 +1,5 @@
-#include <muda/launch/parallel_for.h>
-namespace muda::parallel
+#include <gipc/cuda/all.h>
+namespace gipc::cuda::parallel
 {
 //using T = float;
 //using U = double;
@@ -30,4 +30,4 @@ void Scatter::scatter(BufferView<T> to, const T& value)
                [to = to.viewer().name("to"), value] __device__(int i) mutable
                { to(i) = value; });
 }
-}  // namespace muda::parallel
+}  // namespace gipc::cuda::parallel

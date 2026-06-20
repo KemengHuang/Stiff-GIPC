@@ -1,11 +1,11 @@
 #include <abd_system/abd_system.h>
-#include <muda/cub/device/device_reduce.h>
+#include <gipc/cuda/all.h>
 #include <abd_system/abd_energy.h>
 namespace gipc
 {
 Float ABDSystem::cal_abd_kinetic_energy(ABDSimData& sim_data)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd       = sim_data.device;
     auto  abd_count = sim_data.abd_fem_count_info().abd_body_num;
     m_kinetic_energy_per_affine_body.resize(abd_count);
@@ -104,14 +104,14 @@ Float ABDSystem::cal_abd_kinetic_energy(ABDSimData& sim_data)
                        }
                    }
                });
-    muda::DeviceReduce().Sum(m_kinetic_energy_per_affine_body.data(),
+    gipc::cuda::DeviceReduce().Sum(m_kinetic_energy_per_affine_body.data(),
                              m_kinetic_energy.data(),
                              abd_count);
     return m_kinetic_energy;
 }
 Float ABDSystem::cal_abd_shape_energy(ABDSimData& sim_data)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd       = sim_data.device;
     auto  abd_count = sim_data.abd_fem_count_info().abd_body_num;
     auto  kappa     = parms.kappa;
@@ -136,7 +136,7 @@ Float ABDSystem::cal_abd_shape_energy(ABDSimData& sim_data)
                    V = kappa * volume * dt * dt * shape_energy(q);
                });
 
-    muda::DeviceReduce().Sum(
+    gipc::cuda::DeviceReduce().Sum(
         m_shape_energy_per_affine_body.data(), m_shape_energy.data(), abd_count);
 
     return m_shape_energy;

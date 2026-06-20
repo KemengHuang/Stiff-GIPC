@@ -1,20 +1,20 @@
 #include <abd_system/abd_system.h>
-#include <muda/launch.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/cuda_vec_to_eigen.h>
 namespace gipc
 {
 void ABDSystem::copy_q_to_q_temp(ABDSimData& sim_data)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd             = sim_data.device;
     abd.body_id_to_q_temp = abd.body_id_to_q;
 }
 
 void ABDSystem::step_forward(ABDSimData&                sim_data,
-                             muda::BufferView<double3>  vertexes,
+                             gipc::cuda::BufferView<double3>  vertexes,
                              double                     alpha)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                       = sim_data.device;
     auto  abd_body_count            = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count        = sim_data.abd_fem_count_info().abd_point_num;

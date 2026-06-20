@@ -19,6 +19,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # find packages
 enable_language(CUDA)
+# Keep only the Windows define; host options (/GR /EHsc) are added below via
+# target_compile_options to avoid CMake merging them into a preprocessor define.
+set(CMAKE_CUDA_FLAGS "-D_WINDOWS")
 find_package(Eigen3 REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
@@ -36,7 +39,8 @@ endif()
 add_executable(gipc)
 target_compile_features(gipc PRIVATE cuda_std_17)
 target_include_directories(gipc PRIVATE "StiffGIPC/")
-target_include_directories(gipc PRIVATE "StiffGIPC/muda/src/")
+# muda removed: replaced by gipc/cuda shim
+# target_include_directories(gipc PRIVATE "StiffGIPC/muda/src/")
 file(GLOB_RECURSE GIPC_SOURCE CONFIGURE_DEPENDS 
     "StiffGIPC/*.cu" "StiffGIPC/*.cpp")
 file(GLOB_RECURSE GIPC_HANDER CONFIGURE_DEPENDS 
@@ -52,6 +56,7 @@ USE_SNK1
 ADAPTIVE_KAPPA 
 USE_FRICTION 
 USE_QUADRATIC_BENDING
+CCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING
 )
 
 
@@ -71,6 +76,10 @@ target_link_libraries(gipc PRIVATE cusparse cublas cusolver cudart_static)
 target_link_libraries(gipc PRIVATE metis_partition CUDA::cudart)
 target_link_libraries(gipc PRIVATE GLUT::GLUT GLEW::GLEW OpenGL::GLU Eigen3::Eigen)
 target_link_libraries(gipc PRIVATE nlohmann_json::nlohmann_json)
+
+# Some external C dependencies still pull in the static CRT; gipc uses the
+# dynamic CRT, so drop the static one to avoid LNK4098 conflicts.
+target_link_options(gipc PRIVATE "/NODEFAULTLIB:LIBCMT")
 
 target_compile_features(gipc PRIVATE cxx_std_17)
 
@@ -94,9 +103,20 @@ target_compile_options(gipc
         --extended-lambda 
         --expt-relaxed-constexpr 
         --default-stream=per-thread
+        -Xcompiler=/GR
+        -Xcompiler=/EHsc
+        -Xcompiler=/Zc:preprocessor
     >
 )
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${GIPC_SOURCE} ${GIPC_HANDER})
 
 add_subdirectory("MeshProcess")
+
+# Ensure external C libraries use the same dynamic runtime as the executable
+# to avoid LIBCMT/MSVCRT conflicts.
+foreach(_tgt GKlib metis metis_partition)
+    if(TARGET ${_tgt})
+        set_property(TARGET ${_tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
+endforeach()

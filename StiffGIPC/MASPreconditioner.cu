@@ -9,7 +9,7 @@
 #include "MASPreconditioner.cuh"
 #include "cuda_tools/cuda_tools.h"
 #include "device_launch_parameters.h"
-#include <muda/launch/launch.h>
+#include <gipc/cuda/all.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 
@@ -1829,7 +1829,7 @@ void MASPreconditioner::PrepareHessian_bcoo(Eigen::Matrix3d* triplet_values,
 
 
 
-    using namespace muda;
+    using namespace gipc::cuda;
     int tripletNum = triplet_number;
     if(true)
     {

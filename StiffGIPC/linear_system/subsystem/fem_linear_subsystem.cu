@@ -6,44 +6,44 @@ FEMLinearSubsystem::FEMLinearSubsystem(GIPC& gipc, device_TetraData& tetra_data)
     : m_gipc(gipc)
     , m_tetra_data(tetra_data)
 {
-    //muda::Debug::debug_sync_all(true);
+    //gipc::cuda::Debug::debug_sync_all(true);
 }
 
 
-muda::CBufferView<int> FEMLinearSubsystem::boundary_type() const
+gipc::cuda::CBufferView<int> FEMLinearSubsystem::boundary_type() const
 {
     auto fem_offset = m_gipc.abd_fem_count_info.fem_point_offset;
     auto fem_count  = m_gipc.abd_fem_count_info.fem_point_num;
-    return muda::CBufferView<int>(m_tetra_data.BoundaryType, fem_offset, fem_count);
+    return gipc::cuda::CBufferView<int>(m_tetra_data.BoundaryType, fem_offset, fem_count);
 }
 
-muda::BufferView<double3> FEMLinearSubsystem::barrier_gradient() const
+gipc::cuda::BufferView<double3> FEMLinearSubsystem::barrier_gradient() const
 {
     auto offset    = m_gipc.abd_fem_count_info.fem_point_offset;
     auto fem_count = m_gipc.abd_fem_count_info.fem_point_num;
-    return muda::BufferView<double3>{m_tetra_data.fb, m_gipc.vertexNum}.subview(offset, fem_count);
+    return gipc::cuda::BufferView<double3>{m_tetra_data.fb, m_gipc.vertexNum}.subview(offset, fem_count);
 }
 
-muda::BufferView<double3> FEMLinearSubsystem::shape_gradient() const
+gipc::cuda::BufferView<double3> FEMLinearSubsystem::shape_gradient() const
 {
     auto offset    = m_gipc.abd_fem_count_info.fem_point_offset;
     auto fem_count = m_gipc.abd_fem_count_info.fem_point_num;
-    return muda::BufferView<double3>{m_tetra_data.shape_grads, m_gipc.vertexNum}.subview(
+    return gipc::cuda::BufferView<double3>{m_tetra_data.shape_grads, m_gipc.vertexNum}.subview(
         offset, fem_count);
 }
 
-muda::BufferView<double3> FEMLinearSubsystem::dx() const
+gipc::cuda::BufferView<double3> FEMLinearSubsystem::dx() const
 {
     auto offset    = m_gipc.abd_fem_count_info.fem_point_offset;
     auto fem_count = m_gipc.abd_fem_count_info.fem_point_num;
-    return muda::BufferView<double3>{m_gipc._moveDir, m_gipc.vertexNum}.subview(offset, fem_count);
+    return gipc::cuda::BufferView<double3>{m_gipc._moveDir, m_gipc.vertexNum}.subview(offset, fem_count);
 }
 
-muda::BufferView<double> FEMLinearSubsystem::mass() const
+gipc::cuda::BufferView<double> FEMLinearSubsystem::mass() const
 {
     auto fem_offset = m_gipc.abd_fem_count_info.fem_point_offset;
     auto fem_count  = m_gipc.abd_fem_count_info.fem_point_num;
-    return muda::BufferView<double>{m_tetra_data.masses, m_gipc.vertexNum}.subview(
+    return gipc::cuda::BufferView<double>{m_tetra_data.masses, m_gipc.vertexNum}.subview(
         fem_offset, fem_count);
 }
 
@@ -55,7 +55,7 @@ void FEMLinearSubsystem::report_subsystem_info()
 
 void FEMLinearSubsystem::assemble(DenseVectorView gradient)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     if(m_gipc.abd_fem_count_info.fem_point_num < 1)
         return;
@@ -85,7 +85,7 @@ void FEMLinearSubsystem::assemble(DenseVectorView gradient)
 
 void FEMLinearSubsystem::retrieve_solution(CDenseVectorView dx)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     auto move_dir = this->dx();
 

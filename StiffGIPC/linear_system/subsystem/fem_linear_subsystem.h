@@ -11,12 +11,12 @@ class FEMLinearSubsystem : public DiagonalSubsystem
   public:
     FEMLinearSubsystem(GIPC& gipc, device_TetraData& tetra_data);
 
-    muda::CBufferView<int> boundary_type() const;
+    gipc::cuda::CBufferView<int> boundary_type() const;
 
-    muda::BufferView<double3> barrier_gradient() const;
-    muda::BufferView<double3> shape_gradient() const;
-    muda::BufferView<double3> dx() const;
-    muda::BufferView<double>  mass() const;
+    gipc::cuda::BufferView<double3> barrier_gradient() const;
+    gipc::cuda::BufferView<double3> shape_gradient() const;
+    gipc::cuda::BufferView<double3> dx() const;
+    gipc::cuda::BufferView<double>  mass() const;
 
   public:
     virtual void report_subsystem_info() override;
@@ -28,8 +28,8 @@ class FEMLinearSubsystem : public DiagonalSubsystem
     GIPC&             m_gipc;
     device_TetraData& m_tetra_data;
 
-    muda::DeviceBuffer<gipc::Float> m_local_squared_norm;
-    muda::DeviceVar<gipc::Float>    m_max_squared_norm;
+    gipc::cuda::DeviceBuffer<gipc::Float> m_local_squared_norm;
+    gipc::cuda::DeviceVar<gipc::Float>    m_max_squared_norm;
     gipc::Float                     m_local_tol = 1e-5;
 };
 }  // namespace gipc

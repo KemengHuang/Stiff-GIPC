@@ -1,15 +1,15 @@
 #include <linear_system/preconditioner/diag_preconditioner.h>
-#include <muda/ext/eigen/inverse.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/timer.h>
 namespace gipc
 {
 namespace details
 {
 
-    void diag_assemble(muda::BufferView<gipc::Matrix<3, 3>>  diag_inv,
+    void diag_assemble(gipc::cuda::BufferView<gipc::Matrix<3, 3>>  diag_inv,
                        GIPCTripletMatrix&                   global_triplets)
     {
-        using namespace muda;
+        using namespace gipc::cuda;
 
         ParallelFor()
             .file_line(__FILE__, __LINE__)
@@ -29,11 +29,11 @@ namespace details
                    });
     }
 
-    void apply_diag(muda::CDenseVectorView<gipc::Float>  r,
-                    muda::DenseVectorView<gipc::Float>   z,
-                    muda::BufferView<gipc::Matrix<3, 3>> diag_inv)
+    void apply_diag(gipc::cuda::CDenseVectorView<gipc::Float>  r,
+                    gipc::cuda::DenseVectorView<gipc::Float>   z,
+                    gipc::cuda::BufferView<gipc::Matrix<3, 3>> diag_inv)
     {
-        using namespace muda;
+        using namespace gipc::cuda;
 
         ParallelFor(256)
             .file_line(__FILE__, __LINE__)
@@ -58,8 +58,8 @@ void DiagPreconditioner::assemble(GIPCTripletMatrix& global_triplets)
     details::diag_assemble(m_diag3x3.view(), global_triplets);
 }
 
-void DiagPreconditioner::apply(muda::CDenseVectorView<gipc::Float> r,
-                                  muda::DenseVectorView<gipc::Float>  z)
+void DiagPreconditioner::apply(gipc::cuda::CDenseVectorView<gipc::Float> r,
+                                  gipc::cuda::DenseVectorView<gipc::Float>  z)
 {
     //z.buffer_view().copy_from(r.buffer_view());
     details::apply_diag(r, z, m_diag3x3);

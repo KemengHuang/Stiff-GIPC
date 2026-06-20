@@ -1,7 +1,7 @@
 #pragma once
 #include <gipc/type_define.h>
 
-#include <muda/ext/linear_system/dense_vector_view.h>
+#include <gipc/cuda/all.h>
 
 namespace gipc
 {
@@ -14,8 +14,8 @@ class Spmv
                               int*                          row_ids,
                               int*                          col_ids,
                               int                           triplet_count,
-                              muda::CDenseVectorView<Float> x,
+                              gipc::cuda::CDenseVectorView<Float> x,
                               Float                         b,
-                              muda::DenseVectorView<Float>  y);
+                              gipc::cuda::DenseVectorView<Float>  y);
 };
 }  // namespace gipc

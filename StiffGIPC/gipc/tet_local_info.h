@@ -1,7 +1,7 @@
 #pragma once
 #include <cuda_runtime_api.h>
 #include <gipc/type_define.h>
-#include <muda/tools/debug_log.h>
+#include <gipc/cuda/all.h>
 namespace gipc
 {
 class TetLocalInfo

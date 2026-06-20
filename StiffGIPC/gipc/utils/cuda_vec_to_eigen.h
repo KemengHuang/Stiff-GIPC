@@ -1,5 +1,5 @@
 #pragma once
-#include <muda/muda_def.h>
+#include <gipc/cuda/all.h>
 #include <cuda_runtime_api.h>
 #include <eigen3/Eigen/Core>
 

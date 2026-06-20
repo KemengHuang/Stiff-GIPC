@@ -1,7 +1,7 @@
 #pragma once
-#include <muda/buffer/buffer_view.h>
-#include <muda/launch/launch_base.h>
-namespace muda::parallel
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
+namespace gipc::cuda::parallel
 {
 class Scatter : public LaunchBase<Scatter>
 {
@@ -19,6 +19,6 @@ class Scatter : public LaunchBase<Scatter>
     template <typename T>
     void scatter(BufferView<T> to, const T& value);
 };
-}  // namespace muda::parallel
+}  // namespace gipc::cuda::parallel
 
 #include "details/scatter.inl"

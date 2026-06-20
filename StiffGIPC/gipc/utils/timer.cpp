@@ -1,5 +1,5 @@
 #include <gipc/utils/timer.h>
-#include <muda/check/check_cuda_errors.h>
+#include <gipc/cuda/tools/debug_log.h>
 namespace gipc::details
 {
 void ScopedTimer::tick()

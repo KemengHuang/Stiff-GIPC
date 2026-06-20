@@ -64,7 +64,7 @@ void DiagonalSubsystem::do_retrieve_solution(CDenseVectorView dx)
     retrieve_solution(dx.subview(dof_offset()[0], right_hand_side_dof()));
 }
 
-muda::LinearSystemContext& ILinearSubsystem::ctx() const
+gipc::cuda::LinearSystemContext& ILinearSubsystem::ctx() const
 {
     return m_system->m_context;
 }

@@ -1,6 +1,6 @@
 #pragma once
 #include <cuda_runtime_api.h>
-#include <muda/muda_def.h>
+#include <gipc/cuda/all.h>
 #include <gipc/type_define.h>
 namespace gipc
 {

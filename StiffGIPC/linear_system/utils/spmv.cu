@@ -1,5 +1,5 @@
 #include <linear_system/utils/spmv.h>
-#include <muda/launch/launch.h>
+#include <gipc/cuda/all.h>
 #include <cub/warp/warp_reduce.cuh>
 
 namespace gipc
@@ -10,18 +10,18 @@ void Spmv::warp_reduce_sym_spmv(Float                         a,
                                 int*                          row_ids,
                                 int*                          col_ids,
                                 int                           triplet_count,
-                                muda::CDenseVectorView<Float> x,
+                                gipc::cuda::CDenseVectorView<Float> x,
                                 Float                         b,
-                                muda::DenseVectorView<Float>  y)
+                                gipc::cuda::DenseVectorView<Float>  y)
 
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     constexpr int N = 3;
     using T         = Float;
 
     if(b != 0)
     {
-        muda::ParallelFor()
+        gipc::cuda::ParallelFor()
             .kernel_name(__FUNCTION__)
             .apply(y.size(),
                    [b = b, y = y.viewer().name("y")] __device__(int i) mutable
@@ -29,7 +29,7 @@ void Spmv::warp_reduce_sym_spmv(Float                         a,
     }
     else
     {
-        muda::BufferLaunch().fill<Float>(y.buffer_view(), 0);
+        gipc::cuda::BufferLaunch().fill<Float>(y.buffer_view(), 0);
     }
 
     constexpr int          warp_size = 32;
@@ -37,7 +37,7 @@ void Spmv::warp_reduce_sym_spmv(Float                         a,
     constexpr int          block_dim = 256;
     int block_count = (triplet_count + block_dim - 1) / block_dim;
 
-    muda::Launch(block_count, block_dim)
+    gipc::cuda::Launch(block_count, block_dim)
         .kernel_name(__FUNCTION__)
         .apply(
             [a     = a,

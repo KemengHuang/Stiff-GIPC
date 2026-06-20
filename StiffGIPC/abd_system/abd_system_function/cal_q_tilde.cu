@@ -1,11 +1,11 @@
 #include <abd_system/abd_system.h>
-#include <muda/cub/device/device_reduce.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/timer.h>
 namespace gipc
 {
 void ABDSystem::cal_q_tilde(ABDSimData& sim_data)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd            = sim_data.device;
     auto  abd_body_count = sim_data.abd_fem_count_info().abd_body_num;
     auto  kappa          = parms.kappa;
@@ -50,7 +50,7 @@ void ABDSystem::cal_q_tilde(ABDSimData& sim_data)
     //               local_tolerance(i) = (q_tilde - q).norm();
     //           });
 
-    //muda::DeviceReduce().Max(m_local_tolerance.data(),
+    //gipc::cuda::DeviceReduce().Max(m_local_tolerance.data(),
     //                         m_local_tolerance_max.data(),
     //                         m_local_tolerance.size());
 

@@ -21,7 +21,7 @@ void ABDLinearSubsystem::assemble(DenseVectorView gradient)
 {
     if(m_gipc.abd_fem_count_info.abd_body_num < 1)
         return;
-    using namespace muda;
+    using namespace gipc::cuda;
     ParallelFor()
         .file_line(__FILE__, __LINE__)
         .apply(gradient.size(),
@@ -33,7 +33,7 @@ void ABDLinearSubsystem::assemble(DenseVectorView gradient)
 
 void ABDLinearSubsystem::retrieve_solution(CDenseVectorView dx)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& sim_data = m_abd_sim_data;
 
     auto& dq               = sim_data.device.body_id_to_dq;
@@ -51,7 +51,7 @@ void ABDLinearSubsystem::retrieve_solution(CDenseVectorView dx)
 
     m_abd_system.cal_dx_from_dq(
         sim_data,
-        muda::BufferView<double3>{m_gipc._moveDir, m_gipc.vertexNum}.subview(
+        gipc::cuda::BufferView<double3>{m_gipc._moveDir, m_gipc.vertexNum}.subview(
             abd_point_offset, abd_point_num));
 }
 

@@ -25,8 +25,8 @@ class ABDLinearSubsystem : public gipc::DiagonalSubsystem
     ABDSystem&     m_abd_system;
     ABDSimData&    m_abd_sim_data;
 
-    muda::DeviceBuffer<Float> m_local_squared_norm;
-    muda::DeviceVar<Float>    m_max_squared_norm;
+    gipc::cuda::DeviceBuffer<Float> m_local_squared_norm;
+    gipc::cuda::DeviceVar<Float>    m_max_squared_norm;
     Float                     m_local_tol = 1e-5;
 };
 }  // namespace gipc

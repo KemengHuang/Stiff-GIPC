@@ -1,7 +1,7 @@
 #include <linear_system/utils/converter.h>
-#include <muda/cub/device/device_run_length_encode.h>
-#include <muda/cub/device/device_scan.h>
-#include <muda/cub/device/device_radix_sort.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/timer.h>
 #include <gipc/utils/parallel_algorithm/fast_segmental_reduce.h>
 
@@ -48,7 +48,7 @@ void Converter::_radix_sort_indices_and_blocks(GIPCTripletMatrix& global_triplet
                                                const int& length,
                                                const int& out_start_id)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     auto src_row_indices = global_triplets.block_row_indices(start);
     auto src_col_indices = global_triplets.block_col_indices(start);
@@ -100,7 +100,7 @@ void Converter::_make_unique_indices(GIPCTripletMatrix& global_triplets,
     auto unique_key = global_triplets.block_hash_value();
     auto sort_key   = global_triplets.block_sort_hash_value();
 
-    muda::DeviceRunLengthEncode().Encode(sort_key,
+    gipc::cuda::DeviceRunLengthEncode().Encode(sort_key,
                                          unique_key,
                                          global_triplets.block_temp_buffer(),
                                          global_triplets.d_unique_key_number,
@@ -111,7 +111,7 @@ void Converter::_make_unique_indices(GIPCTripletMatrix& global_triplets,
                               sizeof(int),
                               cudaMemcpyDeviceToHost));
 
-    muda::ParallelFor(256)
+    gipc::cuda::ParallelFor(256)
         .kernel_name(__FUNCTION__)
         .apply(global_triplets.h_unique_key_number,
 
@@ -129,7 +129,7 @@ void Converter::_make_unique_indices(GIPCTripletMatrix& global_triplets,
 void Converter::_make_unique_block_warp_reduction(GIPCTripletMatrix& global_triplets,
                                                   const int& start, const int& length, const int& out_start_id)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     auto sorted_partition_input = global_triplets.block_temp_buffer();
     ParallelFor()
@@ -149,7 +149,7 @@ void Converter::_make_unique_block_warp_reduction(GIPCTripletMatrix& global_trip
     auto col_indices = global_triplets.block_col_indices(start);
 
 
-    muda::ParallelFor(256)
+    gipc::cuda::ParallelFor(256)
         .kernel_name(__FUNCTION__)
         .apply(length,
                [row_indices,
@@ -197,7 +197,7 @@ void Converter::_make_unique_block_warp_reduction(GIPCTripletMatrix& global_trip
 
 void Converter::ge2sym(GIPCTripletMatrix& global_triplets)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     auto counts  = global_triplets.block_index();
     auto offsets = global_triplets.block_sort_index();

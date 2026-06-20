@@ -10,7 +10,7 @@ void GIPC::build_gipc_system(device_TetraData& tet)
     gipc::Timer::disable_all();
     
     // set up debug
-    muda::Debug::debug_sync_all(false);
+    gipc::cuda::Debug::debug_sync_all(false);
 
     std::cout << "- create ABD system..." << std::endl;
     m_abd_sim_data            = std::make_unique<gipc::ABDSimData>(*this, tet);

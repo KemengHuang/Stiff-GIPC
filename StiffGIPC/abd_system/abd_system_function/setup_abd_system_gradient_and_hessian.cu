@@ -1,6 +1,6 @@
 #include <abd_system/abd_system.h>
-#include <muda/launch.h>
-#include <muda/ext/eigen/evd.h>
+#include <gipc/cuda/all.h>
+#include <gipc/cuda/all.h>
 #include <gipc/utils/cuda_vec_to_eigen.h>
 #include <abd_system/abd_energy.h>
 #include <gipc/utils/math.h>
@@ -84,7 +84,7 @@ __global__ inline void moveMemory_0(T* data, int output_start, int input_start, 
 
 
 
-__global__ void write_barrier_hessian(//muda::TripletMatrixViewer<double, 12> tripletViewer,
+__global__ void write_barrier_hessian(//gipc::cuda::TripletMatrixViewer<double, 12> tripletViewer,
                                       Eigen::Matrix3d*        triplet,
                                       int*              rows,
                                       int*              cols,
@@ -143,7 +143,7 @@ __global__ void write_abd_body_hessian(
 
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   GIPCTripletMatrix& global_triplets,
-                                                  muda::CBufferView<double3> vertex_barrier_gradient)
+                                                  gipc::cuda::CBufferView<double3> vertex_barrier_gradient)
 {
     _cal_abd_body_gradient_and_hessian(sim_data);
     _cal_abd_system_barrier_gradient(sim_data, vertex_barrier_gradient);
@@ -152,7 +152,7 @@ void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
 
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   GIPCTripletMatrix& global_triplets,
-                                                  muda::CBufferView<Vector3> vertex_barrier_gradient)
+                                                  gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient)
 {
     _cal_abd_body_gradient_and_hessian(sim_data);
     _cal_abd_system_barrier_gradient(sim_data, vertex_barrier_gradient);
@@ -161,7 +161,7 @@ void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
 
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   int*        fbtype,
-                                                  muda::CBufferView<double3> vertex_barrier_gradient,
+                                                  gipc::cuda::CBufferView<double3> vertex_barrier_gradient,
                                                   GIPCTripletMatrix& global_triplets)
 {
     fem_boundary_type = fbtype;
@@ -186,7 +186,7 @@ __device__ __host__ void make_pd(Matrix9x9& mat)
 {
     Vector9   eigen_values;
     Matrix9x9 eigen_vectors;
-    muda::eigen::evd<Float, 9>(mat, eigen_values, eigen_vectors);
+    gipc::cuda::eigen::evd<Float, 9>(mat, eigen_values, eigen_vectors);
     for(int i = 0; i < 9; ++i)
     {
         if(eigen_values(i) < 0)
@@ -201,7 +201,7 @@ __device__ __host__ void make_pd(Matrix9x9& mat)
 void ABDSystem::_cal_abd_body_gradient_and_hessian(ABDSimData& sim_data)
 {
     gipc::Timer timer("_cal_abd_body_gradient_and_hessian");
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd       = sim_data.device;
     auto  N         = sim_data.abd_fem_count_info().abd_body_num;
     auto  parameter = parms;
@@ -347,10 +347,10 @@ void ABDSystem::_cal_abd_body_gradient_and_hessian(ABDSimData& sim_data)
 
 
 void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                                 muda::CBufferView<double3> vertex_barrier_gradient)
+                                                 gipc::cuda::CBufferView<double3> vertex_barrier_gradient)
 {
     gipc::Timer timer("_cal_abd_system_barrier_gradient");
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -385,9 +385,9 @@ void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
 }
 
 void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                                 muda::CBufferView<Vector3> vertex_barrier_gradient)
+                                                 gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -425,7 +425,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
                                           GIPCTripletMatrix& global_triplets)
 {
     gipc::Timer timer("_setup_abd_system_hessian");
-    using namespace muda;
+    using namespace gipc::cuda;
 
     if(global_triplets.abd_abd_contact_num)
     {
@@ -516,7 +516,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
         auto fem_point_offset = sim_data.abd_fem_count_info().abd_point_num;
         auto fem_count        = sim_data.abd_fem_count_info().fem_point_num;
         auto femb_type =
-            muda::CBufferView<int>(fem_boundary_type, fem_point_offset, fem_count);
+            gipc::cuda::CBufferView<int>(fem_boundary_type, fem_point_offset, fem_count);
 
         ParallelFor()
             .kernel_name(__FUNCTION__)
@@ -611,7 +611,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
 
 void ABDSystem::_cal_abd_system_preconditioner(ABDSimData& sim_data)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                        = sim_data.device;
     auto  unique_point_id_to_body_id = sim_data.unique_point_id_to_body_id();
     auto  body_hessian_size = sim_data.abd_fem_count_info().abd_body_num;

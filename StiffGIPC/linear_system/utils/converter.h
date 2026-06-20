@@ -1,6 +1,6 @@
 #pragma once
 #include <gipc/type_define.h>
-#include <muda/buffer/device_buffer.h>
+#include <gipc/cuda/all.h>
 #include "linear_system/linear_system/global_matrix.h"
 namespace gipc
 {

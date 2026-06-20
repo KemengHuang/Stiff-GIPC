@@ -1,5 +1,5 @@
-#include <muda/launch/parallel_for.h>
-namespace muda::parallel
+#include <gipc/cuda/all.h>
+namespace gipc::cuda::parallel
 {
 //using F = double(float);
 //using T = float;
@@ -14,7 +14,7 @@ void Transform::transform(BufferView<T> to, CBufferView<U> from)
     ParallelFor(0, stream())
         .apply(from.size(),
                [from, to] __device__(int i) mutable
-               { *to.data(i) = *from.data(i); });
+               { to.data()[i] = from.data()[i]; });
 }
 
 
@@ -27,7 +27,7 @@ void Transform::transform(BufferView<T> to, CBufferView<U> from, F&& f)
                [from, to, f = std::move(f)] __device__(int i) mutable
                {
                    static_assert(std::is_invocable_v<F, U>, "f must be: U (T)");
-                   *to.data(i) = f(*from.data(i));
+                   to.data()[i] = f(from.data()[i]);
                });
 }
 template <typename T, typename F>
@@ -38,7 +38,7 @@ void Transform::transform(BufferView<T> to, F&& f)
                [to, f = std::move(f)] __device__(int i) mutable
                {
                    static_assert(std::is_invocable_v<F, int>, "f must be: T (int)");
-                   *to.data(i) = f(i);
+                   to.data()[i] = f(i);
                });
 }
-}  // namespace muda::parallel
+}  // namespace gipc::cuda::parallel

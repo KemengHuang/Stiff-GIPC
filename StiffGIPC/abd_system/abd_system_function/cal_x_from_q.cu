@@ -2,9 +2,9 @@
 #include <gipc/utils/cuda_vec_to_eigen.h>
 namespace gipc
 {
-void ABDSystem::cal_x_from_q(ABDSimData& sim_data, muda::BufferView<double3> vertices)
+void ABDSystem::cal_x_from_q(ABDSimData& sim_data, gipc::cuda::BufferView<double3> vertices)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -31,9 +31,9 @@ void ABDSystem::cal_x_from_q(ABDSimData& sim_data, muda::BufferView<double3> ver
                });
 }
 
-void ABDSystem::cal_dx_from_dq(ABDSimData& sim_data, muda::BufferView<double3> move_dir)
+void ABDSystem::cal_dx_from_dq(ABDSimData& sim_data, gipc::cuda::BufferView<double3> move_dir)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -69,9 +69,9 @@ void ABDSystem::cal_dx_from_dq(ABDSimData& sim_data, muda::BufferView<double3> m
                    //print("dx(%d): %f %f %f\n", i, dx.x(), dx.y(), dx.z());
                });
 }
-void ABDSystem::cal_x_from_q(ABDSimData& sim_data, muda::BufferView<Vector3> vertices)
+void ABDSystem::cal_x_from_q(ABDSimData& sim_data, gipc::cuda::BufferView<Vector3> vertices)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -96,9 +96,9 @@ void ABDSystem::cal_x_from_q(ABDSimData& sim_data, muda::BufferView<Vector3> ver
                });
 }
 
-void ABDSystem::cal_dx_from_dq(ABDSimData& sim_data, muda::BufferView<Vector3> move_dir)
+void ABDSystem::cal_dx_from_dq(ABDSimData& sim_data, gipc::cuda::BufferView<Vector3> move_dir)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;

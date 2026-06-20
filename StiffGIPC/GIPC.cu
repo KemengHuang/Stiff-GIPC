@@ -23,7 +23,7 @@
 #include <gipc_path.h>
 #include <gipc/utils/timer.h>
 
-#include <muda/cub/device/device_radix_sort.h>
+#include <gipc/cuda/all.h>
 using namespace Eigen;
 #define RANK 2
 #define NEWF
@@ -9636,9 +9636,9 @@ void stepForward(double3* _vertexes,
 
 void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_boundary)
 {
-    auto vertexes = muda::BufferView<double3>{TetMesh.vertexes, vertexNum};
-    auto vertexes_temp = muda::BufferView<double3>{TetMesh.temp_double3Mem, vertexNum};
-    auto move_dir = muda::BufferView<double3>{_moveDir, vertexNum};
+    auto vertexes = gipc::cuda::BufferView<double3>{TetMesh.vertexes, vertexNum};
+    auto vertexes_temp = gipc::cuda::BufferView<double3>{TetMesh.temp_double3Mem, vertexNum};
+    auto move_dir = gipc::cuda::BufferView<double3>{_moveDir, vertexNum};
     if(abd_fem_count_info.fem_point_num > 0)
     {
         auto fem_vertexes = vertexes.subview(abd_fem_count_info.fem_point_offset,
@@ -9650,7 +9650,7 @@ void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_bound
         auto fem_move_dir = move_dir.subview(abd_fem_count_info.fem_point_offset,
                                              abd_fem_count_info.fem_point_num);
 
-        auto btype = muda::BufferView<int>{TetMesh.BoundaryType, vertexNum}.subview(
+        auto btype = gipc::cuda::BufferView<int>{TetMesh.BoundaryType, vertexNum}.subview(
             abd_fem_count_info.fem_point_offset, abd_fem_count_info.fem_point_num);
 
 
@@ -9665,7 +9665,7 @@ void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_bound
     if(abd_fem_count_info.abd_point_num <= 0)
         return;
 
-    auto abd_vertexes = muda::BufferView<double3>{TetMesh.vertexes, vertexNum}.subview(
+    auto abd_vertexes = gipc::cuda::BufferView<double3>{TetMesh.vertexes, vertexNum}.subview(
         abd_fem_count_info.abd_point_offset, abd_fem_count_info.abd_point_num);
 
     m_abd_system->step_forward(*m_abd_sim_data, abd_vertexes, alpha);
@@ -9932,7 +9932,7 @@ void GIPC::initKappa(device_TetraData& TetMesh)
 void GIPC::partitionContactHessian()
 {
 
-    muda::DeviceRadixSort().SortPairs(gipc_global_triplet.block_hash_value(),
+    gipc::cuda::DeviceRadixSort().SortPairs(gipc_global_triplet.block_hash_value(),
                                       gipc_global_triplet.block_sort_hash_value(),
                                       gipc_global_triplet.block_index(),
                                       gipc_global_triplet.block_sort_index(),
@@ -10114,7 +10114,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
     CUDA_SAFE_CALL(cudaMemset(TetMesh.fb, 0, vertexNum * sizeof(double3)));
     CUDA_SAFE_CALL(cudaMemset(TetMesh.shape_grads, 0, vertexNum * sizeof(double3)));
 
-    //muda::BufferView<double3>{TetMesh.shape_grads, vertexNum}.fill(double3{0, 0, 0});
+    //gipc::cuda::BufferView<double3>{TetMesh.shape_grads, vertexNum}.fill(double3{0, 0, 0});
 
 
     auto shape_grads   = TetMesh.shape_grads;
@@ -10172,7 +10172,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
         m_abd_system->setup_abd_system_gradient_hessian(
             *m_abd_sim_data,
             TetMesh.BoundaryType,
-            muda::BufferView<double3>{TetMesh.fb, vertexNum}.subview(
+            gipc::cuda::BufferView<double3>{TetMesh.fb, vertexNum}.subview(
                 abd_fem_count_info.abd_point_offset, abd_fem_count_info.abd_point_num),
             gipc_global_triplet);
     }
@@ -10180,7 +10180,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
     int abd_dofs = abd_fem_count_info.abd_body_num * 4;
     int fem_global_hessian_index_offset = -abd_fem_count_info.abd_point_num + abd_dofs;
     {
-        muda::ParallelFor(256)
+        gipc::cuda::ParallelFor(256)
             .kernel_name(__FUNCTION__)
             .apply(gipc_global_triplet.fem_fem_contact_num,
                    [cfem_rows = gipc_global_triplet.block_row_indices(
@@ -10292,7 +10292,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
         gipc_global_triplet.global_triplet_offset += softNum;
 
         int fem_triplet_num = gipc_global_triplet.global_triplet_offset - fem_triplet_start;
-        muda::ParallelFor()
+        gipc::cuda::ParallelFor()
             .file_line(__FILE__, __LINE__)
             .apply(fem_triplet_num,
                    [  
@@ -10314,7 +10314,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
 
 
         //int massNum =
-        muda::ParallelFor()
+        gipc::cuda::ParallelFor()
             .file_line(__FILE__, __LINE__)
             .apply(abd_fem_count_info.fem_point_num,
                    [mass      = TetMesh.masses,
@@ -10678,7 +10678,7 @@ bool GIPC::isIntersected(device_TetraData& TetMesh)
 
 bool GIPC::lineSearch(device_TetraData& TetMesh, double& alpha, const double& cfl_alpha)
 {
-    muda::wait_device();
+    gipc::cuda::wait_device();
     bool   stopped       = false;
     double lastEnergyVal = computeEnergy(TetMesh);
 

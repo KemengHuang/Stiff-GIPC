@@ -17,10 +17,10 @@ void ABDPreconditioner::assemble()
     m_abd._cal_abd_system_preconditioner(m_sim_data);
 }
 
-void ABDPreconditioner::apply(muda::CDenseVectorView<Float> r,
-                              muda::DenseVectorView<Float>  z)
+void ABDPreconditioner::apply(gipc::cuda::CDenseVectorView<Float> r,
+                              gipc::cuda::DenseVectorView<Float>  z)
 {
-    using namespace muda;
+    using namespace gipc::cuda;
 
     auto abd_body_count = m_sim_data.abd_fem_count_info().abd_body_num;
     auto abd_inv_diag   = m_abd.abd_system_diag_preconditioner.view();

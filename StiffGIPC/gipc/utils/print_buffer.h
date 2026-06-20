@@ -1,10 +1,10 @@
 #pragma once
-#include <muda/buffer.h>
+#include <gipc/cuda/all.h>
 #include <iostream>
 namespace gipc
 {
 template <typename T>
-std::ostream& operator<<(std::ostream& o, muda::CBufferView<T> const& b)
+std::ostream& operator<<(std::ostream& o, gipc::cuda::CBufferView<T> const& b)
 {
     std::vector<T> v(b.size());
     b.copy_to(v.data());
@@ -16,13 +16,13 @@ std::ostream& operator<<(std::ostream& o, muda::CBufferView<T> const& b)
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& o, muda::BufferView<T> const& b)
+std::ostream& operator<<(std::ostream& o, gipc::cuda::BufferView<T> const& b)
 {
-    return operator<<(o, muda::CBufferView<T>(b));
+    return operator<<(o, gipc::cuda::CBufferView<T>(b));
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& o, muda::DeviceBuffer<T> const& b)
+std::ostream& operator<<(std::ostream& o, gipc::cuda::DeviceBuffer<T> const& b)
 {
     return operator<<(o, b.view());
 }

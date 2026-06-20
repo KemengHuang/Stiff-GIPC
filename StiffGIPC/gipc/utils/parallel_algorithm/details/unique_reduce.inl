@@ -4,8 +4,8 @@ namespace gipc
 {
 template <typename T>
 template <typename ReduceOp>
-void UniqueReduce<T>::sort_unique_reduce(muda::CBufferView<T>   in,
-                                         muda::DeviceBuffer<T>& out,
+void UniqueReduce<T>::sort_unique_reduce(gipc::cuda::CBufferView<T>   in,
+                                         gipc::cuda::DeviceBuffer<T>& out,
                                          ReduceOp               op,
                                          T                      init)
 {
@@ -15,7 +15,7 @@ void UniqueReduce<T>::sort_unique_reduce(muda::CBufferView<T>   in,
     m_temp_sort_in.view().copy_from(in);
     {
         Timer timer{__FUNCTION__ "-sort"};
-        muda::DeviceMergeSort().SortKeys(
+        gipc::cuda::DeviceMergeSort().SortKeys(
                                          m_temp_sort_in.data(),
                                          in.size(),
                                          [] __host__ __device__(const T& left, const T& right)
@@ -30,8 +30,8 @@ void UniqueReduce<T>::sort_unique_reduce(muda::CBufferView<T>   in,
 
 template <typename T>
 template <typename ReduceOp>
-void UniqueReduce<T>::unique_reduce(muda::CBufferView<T>   in,
-                                    muda::DeviceBuffer<T>& out,
+void UniqueReduce<T>::unique_reduce(gipc::cuda::CBufferView<T>   in,
+                                    gipc::cuda::DeviceBuffer<T>& out,
                                     ReduceOp               op,
                                     T                      init)
 {
@@ -40,7 +40,7 @@ void UniqueReduce<T>::unique_reduce(muda::CBufferView<T>   in,
 
     {
         Timer timer{__FUNCTION__ "-unique"};
-        muda::DeviceRunLengthEncode().Encode(
+        gipc::cuda::DeviceRunLengthEncode().Encode(
                                              in.data(),
                                              m_unique_out.data(),
                                              m_unique_counts.data(),
@@ -53,10 +53,10 @@ void UniqueReduce<T>::unique_reduce(muda::CBufferView<T>   in,
     m_unique_counts.resize(h_unique_num);
     m_unique_out.resize(h_unique_num);
 
-    muda::DeviceScan().ExclusiveSum(
+    gipc::cuda::DeviceScan().ExclusiveSum(
          m_unique_counts.data(), m_unique_offsets.data(), h_unique_num);
 
-    muda::ParallelFor()
+    gipc::cuda::ParallelFor()
         .kernel_name(__FUNCTION__ "-calculate_offset_end")
         .apply(h_unique_num,
                [offsets = m_unique_offsets.viewer().name("offsets"),
@@ -67,7 +67,7 @@ void UniqueReduce<T>::unique_reduce(muda::CBufferView<T>   in,
 
     {
         Timer timer{__FUNCTION__ "-reduce"};
-        muda::DeviceSegmentedReduce().Reduce(
+        gipc::cuda::DeviceSegmentedReduce().Reduce(
                                              in.data(),
                                              out.data(),
                                              out.size(),

@@ -80,7 +80,7 @@ void GlobalLinearSystem::distribute_solution()
     for(auto& subsystem : m_inner_subsystems)
         subsystem->do_retrieve_solution(x_view);
 
-    muda::wait_device();
+    gipc::cuda::wait_device();
 }
 
 DiagonalSubsystem& GlobalLinearSystem::_create_subsystem(U<DiagonalSubsystem>&& subsystem)
@@ -149,8 +149,8 @@ Json GlobalLinearSystem::as_json() const
     return j;
 }
 
-void GlobalLinearSystem::apply_preconditioner(muda::DenseVectorView<Float>  z,
-                                              muda::CDenseVectorView<Float> r)
+void GlobalLinearSystem::apply_preconditioner(gipc::cuda::DenseVectorView<Float>  z,
+                                              gipc::cuda::CDenseVectorView<Float> r)
 {
     // first apply global preconditioner
     if(m_global_preconditioner)
@@ -180,9 +180,9 @@ void GlobalLinearSystem::convert_new()
 
 
 void GlobalLinearSystem::spmv(Float                         a,
-                              muda::CDenseVectorView<Float> x,
+                              gipc::cuda::CDenseVectorView<Float> x,
                               Float                         b,
-                              muda::DenseVectorView<Float>  y)
+                              gipc::cuda::DenseVectorView<Float>  y)
 {
 
     m_spmv.warp_reduce_sym_spmv(a,
