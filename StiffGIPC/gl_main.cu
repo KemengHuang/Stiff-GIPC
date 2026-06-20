@@ -801,7 +801,7 @@ void set_case1()
 
 void set_case2()
 {
-    ipc.pcg_data.P_type = 1;
+    ipc.pcg_data.P_type = 0;
     gipc::SimpleSceneImporter importer;
     double                    scale           = 0.2;
     double3                   position_offset = make_double3(0, -0.5, 0);
@@ -1098,7 +1098,7 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 3;
+    int scene_no = 1;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

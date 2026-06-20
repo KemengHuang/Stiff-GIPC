@@ -22,7 +22,7 @@ __global__ void diag_assemble_kernel(int                                  n,
     if(i != j)
         return;
 
-    diag(I) = cudatool::eigen::inverse(H);
+    diag(i) = cudatool::eigen::inverse(H);
 }
 
 __global__ void apply_diag_kernel(int                                  n,
@@ -79,6 +79,7 @@ void DiagPreconditioner::assemble(GIPCTripletMatrix& global_triplets)
     gipc::Timer timer{"precomputing Preconditioner"};
     auto        cols = global_triplets.block_cols();
     m_diag3x3.resize(cols);
+    //m_diag3x3.view().fill(gipc::Matrix3x3::Identity());
     details::diag_assemble(m_diag3x3.view(), global_triplets);
 }
 
