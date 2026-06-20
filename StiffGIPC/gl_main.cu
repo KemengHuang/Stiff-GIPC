@@ -801,6 +801,7 @@ void set_case1()
 
 void set_case2()
 {
+    ipc.pcg_data.P_type = 1;
     gipc::SimpleSceneImporter importer;
     double                    scale           = 0.2;
     double3                   position_offset = make_double3(0, -0.5, 0);
@@ -810,7 +811,7 @@ void set_case2()
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
 
     linear_system_buff_scale = 1.0;
-    double Youngth_Modulus = 1e4;
+    double Youngth_Modulus = 1e7;
     string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
                            3,
@@ -864,7 +865,7 @@ void set_case3()
 
 void set_case4()
 {
-    ipc.pcg_data.P_type = 1;
+    ipc.pcg_data.P_type = 0;
     linear_system_buff_scale = 1.0;
     gipc::SimpleSceneImporter importer;
     double                    scale           = 0.6;
@@ -1097,7 +1098,7 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 1;
+    int scene_no = 3;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

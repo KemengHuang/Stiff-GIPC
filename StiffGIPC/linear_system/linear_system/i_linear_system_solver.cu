@@ -6,21 +6,21 @@ namespace gipc
 IterativeSolver::~IterativeSolver() {}
 
 void IterativeSolver::spmv(Float                         a,
-                           gipc::cuda::CDenseVectorView<Float> x,
+                           cudatool::CDenseVectorView<Float> x,
                            Float                         b,
-                           gipc::cuda::DenseVectorView<Float>  y)
+                           cudatool::DenseVectorView<Float>  y)
 {
     m_system->spmv(a, x, b, y);
 }
 
-void IterativeSolver::apply_preconditioner(gipc::cuda::DenseVectorView<Float> z,
-                                           gipc::cuda::CDenseVectorView<Float> r) const
+void IterativeSolver::apply_preconditioner(cudatool::DenseVectorView<Float> z,
+                                           cudatool::CDenseVectorView<Float> r) const
 {
     m_system->apply_preconditioner(z, r);
 }
 
 
-gipc::cuda::LinearSystemContext& IterativeSolver::ctx() const
+cudatool::LinearSystemContext& IterativeSolver::ctx() const
 {
     return m_system->m_context;
 }

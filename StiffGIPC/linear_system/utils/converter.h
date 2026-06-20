@@ -1,6 +1,6 @@
 #pragma once
 #include <gipc/type_define.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include "linear_system/linear_system/global_matrix.h"
 namespace gipc
 {

@@ -9,7 +9,7 @@
 #include "MASPreconditioner.cuh"
 #include "cuda_tools/cuda_tools.h"
 #include "device_launch_parameters.h"
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 
@@ -1812,6 +1812,224 @@ int MASPreconditioner::ReorderRealtime(int cpNum)
     return totalNumberClusters;
 }
 
+namespace
+{
+__global__ void prepare_hessian_bcoo_kernel(int                   tripletNum,
+                                            int                   offset,
+                                            int                   levelNum,
+                                            int*                  _goingNext,
+                                            __GEIGEN__::MasMatrixSymT* _invMatrix,
+                                            int*                  _real_map_partId,
+                                            uint32_t*             indices,
+                                            Eigen::Matrix3d*      triplet_values,
+                                            int*                  row_ids,
+                                            int*                  col_ids)
+{
+    int I = blockIdx.x * blockDim.x + threadIdx.x;
+    if(I >= tripletNum)
+        return;
+    int index                              = indices[I];
+    auto vertRid_real                      = row_ids[index];
+    auto vertCid_real                       = col_ids[index];
+    auto H = triplet_values[index];
+    vertRid_real -= offset;
+    vertCid_real -= offset;
+    int vertCid = _real_map_partId[vertCid_real];
+    int vertRid = _real_map_partId[vertRid_real];
+    int cPid    = vertCid / BANKSIZE;
+
+    if(vertCid / BANKSIZE == vertRid / BANKSIZE)
+    {
+        if(vertCid >= vertRid)
+        {
+            int bvRid = vertRid % BANKSIZE;
+            int bvCid = vertCid % BANKSIZE;
+            int index = BANKSIZE * bvRid - bvRid * (bvRid + 1) / 2 + bvCid;
+
+            _invMatrix[cPid].M[index] = H;
+        }
+    }
+    else
+    {
+        int level = 0;
+        while(level < levelNum - 1)
+        {
+            level++;
+            if(level == 1)
+            {
+                vertCid = _goingNext[vertCid_real];
+                vertRid = _goingNext[vertRid_real];
+            }
+            else
+            {
+                vertCid = _goingNext[vertCid];
+                vertRid = _goingNext[vertRid];
+            }
+            cPid = vertCid / BANKSIZE;
+            if(vertCid / BANKSIZE == vertRid / BANKSIZE)
+            {
+                if(vertCid >= vertRid)
+                {
+                    int bvRid = vertRid % BANKSIZE;
+                    int bvCid = vertCid % BANKSIZE;
+                    int index = BANKSIZE * bvRid - bvRid * (bvRid + 1) / 2 + bvCid;
+                    for(int i = 0; i < 3; i++)
+                    {
+                        for(int j = 0; j < 3; j++)
+                        {
+                            atomicAdd(
+                                &(_invMatrix[cPid].M[index](i, j)),
+                                H(i, j));
+                            if(vertCid == vertRid)
+                            {
+                                atomicAdd(
+                                    &(_invMatrix[cPid].M[index](i, j)),
+                                    H(j, i));
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    int bvRid = vertRid % BANKSIZE;
+                    int bvCid = vertCid % BANKSIZE;
+                    int index = BANKSIZE * bvCid - bvCid * (bvCid + 1) / 2 + bvRid;
+                    for(int i = 0; i < 3; i++)
+                    {
+                        for(int j = 0; j < 3; j++)
+                        {
+                            atomicAdd(&(_invMatrix[cPid].M[index](i, j)),
+                                      H(j, i));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+__global__ void prepare_hessian_bcoo_sum_kernel(int                   tripletNum,
+                                                int                   levelNum,
+                                                int*                  _goingNext,
+                                                __GEIGEN__::MasMatrixSymT* _invMatrix,
+                                                int*                  _partId_map_real,
+                                                unsigned int*         _fineConnectMsk,
+                                                int*                  _prefix0)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= tripletNum)
+        return;
+    int HSIZE = (BANKSIZE * BANKSIZE);
+    int Hid   = idx / HSIZE;
+    int LMRid = (idx % HSIZE) / BANKSIZE;
+    int LMCid = (idx % HSIZE) % BANKSIZE;
+
+    int MRid = Hid * BANKSIZE + LMRid;
+    int MCid = Hid * BANKSIZE + LMCid;
+
+    int            rdx = _partId_map_real[MRid];
+    int            cdx = _partId_map_real[MCid];
+    __shared__ int prefix;
+
+    if(threadIdx.x == 0)
+    {
+        prefix = _prefix0[Hid];
+    }
+    __syncthreads();
+    Eigen::Matrix3d mat3;
+    if(LMCid >= LMRid)
+    {
+        int index = BANKSIZE * LMRid - LMRid * (LMRid + 1) / 2 + LMCid;
+        mat3 = _invMatrix[Hid].M[index];
+    }
+    else
+    {
+        int index = BANKSIZE * LMCid - LMCid * (LMCid + 1) / 2 + LMRid;
+        mat3 = _invMatrix[Hid].M[index].transpose();
+    }
+
+    if((rdx >= 0) && (cdx >= 0))
+    {
+        if(prefix == 1)
+        {
+            int warpId = threadIdx.x & 0x1f;
+            bool bBoundary = (warpId == 0) || (rdx < 0) || (cdx < 0);
+            unsigned int mark = __ballot_sync(0xffffffff, bBoundary);
+            mark = __brev(mark);
+            int clzlen = __clz(mark << (warpId + 1));
+            unsigned int interval = std::min(clzlen, 31 - warpId);
+            for(int iter = 1; iter < 32; iter <<= 1)
+            {
+                Eigen::Matrix3d matTemp;
+                for(int i = 0; i < 3; i++)
+                {
+                    for(int j = 0; j < 3; j++)
+                    {
+                        matTemp(i, j) =
+                            __shfl_down_sync(0xffffffff, mat3(i, j), iter);
+                    }
+                }
+                if(interval >= iter)
+                {
+                    mat3 = mat3 + matTemp;
+                }
+            }
+            int level = 0;
+            if(bBoundary)
+            {
+                int nextId = _goingNext[rdx];
+                while(level < levelNum - 1)
+                {
+                    level++;
+                    int cPid  = nextId / BANKSIZE;
+                    int bvRid = nextId % BANKSIZE;
+                    int bvCid = nextId % BANKSIZE;
+                    int index = BANKSIZE * bvRid - bvRid * (bvRid + 1) / 2 + bvCid;
+                    for(int i = 0; i < 3; i++)
+                    {
+                        for(int j = 0; j < 3; j++)
+                        {
+                            atomicAdd(
+                                &(_invMatrix[cPid].M[index](i, j)),
+                                mat3(i, j));
+                        }
+                    }
+                    nextId = _goingNext[nextId];
+                }
+            }
+        }
+        else
+        {
+            int level = 0;
+            while(level < levelNum - 1)
+            {
+                level++;
+                rdx      = _goingNext[rdx];
+                cdx      = _goingNext[cdx];
+                int cPid = cdx / BANKSIZE;
+                if(rdx / BANKSIZE == cdx / BANKSIZE)
+                {
+                    if(cdx >= rdx)
+                    {
+                        int bvRid = rdx % BANKSIZE;
+                        int bvCid = cdx % BANKSIZE;
+                        int index = BANKSIZE * bvRid - bvRid * (bvRid + 1) / 2 + bvCid;
+
+                        for(int i = 0; i < 3; i++)
+                        {
+                            for(int j = 0; j < 3; j++)
+                            {
+                                atomicAdd(&(_invMatrix[cPid].M[index](i, j)),
+                                          mat3(i, j));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+}  // namespace
 
 void MASPreconditioner::PrepareHessian_bcoo(Eigen::Matrix3d* triplet_values,
                                             int*             row_ids,
@@ -1829,237 +2047,42 @@ void MASPreconditioner::PrepareHessian_bcoo(Eigen::Matrix3d* triplet_values,
 
 
 
-    using namespace gipc::cuda;
+    using namespace cudatool;
     int tripletNum = triplet_number;
     if(true)
     {
-        ParallelFor()
-            .file_line(__FILE__, __LINE__)
-            .apply(
-                tripletNum,
-                [offset           = offset,
-                 levelNum         = levelnum,
-                 _goingNext       = d_goingNext,
-                 _invMatrix       = d_inverseMatMas,
-                 _real_map_partId = d_real_map_partId,
-                 indices,
-                 triplet_values, row_ids, col_ids] __device__(int I) mutable
-                {
-                    int index                              = indices[I];
-                    auto vertRid_real                      = row_ids[index];
-                    auto vertCid_real                       = col_ids[index];
-                    auto H = triplet_values[index];
-                    //auto&& [vertRid_real, vertCid_real, H] = hessian(index);
-                    vertRid_real -= offset;
-                    vertCid_real -= offset;
-                    int vertCid = _real_map_partId[vertCid_real];
-                    int vertRid = _real_map_partId[vertRid_real];
-                    int cPid    = vertCid / BANKSIZE;
-
-
-                    if(vertCid / BANKSIZE == vertRid / BANKSIZE)
-                    {
-                        if(vertCid >= vertRid)
-                        {
-                            int bvRid = vertRid % BANKSIZE;
-                            int bvCid = vertCid % BANKSIZE;
-                            int index = BANKSIZE * bvRid - bvRid * (bvRid + 1) / 2 + bvCid;
-
-                            _invMatrix[cPid].M[index] = H;
-                        }
-                    }
-                    else
-                    {
-                        int level = 0;
-                        while(level < levelNum - 1)
-                        {
-                            level++;
-                            if(level == 1)
-                            {
-                                vertCid = _goingNext[vertCid_real];
-                                vertRid = _goingNext[vertRid_real];
-                            }
-                            else
-                            {
-                                vertCid = _goingNext[vertCid];
-                                vertRid = _goingNext[vertRid];
-                            }
-                            cPid = vertCid / BANKSIZE;
-                            if(vertCid / BANKSIZE == vertRid / BANKSIZE)
-                            {
-
-                                if(vertCid >= vertRid)
-                                {
-                                    int bvRid = vertRid % BANKSIZE;
-                                    int bvCid = vertCid % BANKSIZE;
-                                    int index = BANKSIZE * bvRid
-                                                - bvRid * (bvRid + 1) / 2 + bvCid;
-                                    for(int i = 0; i < 3; i++)
-                                    {
-                                        for(int j = 0; j < 3; j++)
-                                        {
-                                            atomicAdd(
-                                                &(_invMatrix[cPid].M[index](i, j)),
-                                                H(i, j));
-                                            if(vertCid == vertRid)
-                                            {
-                                                atomicAdd(
-                                                    &(_invMatrix[cPid].M[index](i, j)),
-                                                    H(j, i));
-                                            }
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    int bvRid = vertRid % BANKSIZE;
-                                    int bvCid = vertCid % BANKSIZE;
-                                    int index = BANKSIZE * bvCid
-                                                - bvCid * (bvCid + 1) / 2 + bvRid;
-                                    for(int i = 0; i < 3; i++)
-                                    {
-                                        for(int j = 0; j < 3; j++)
-                                        {
-                                            atomicAdd(&(_invMatrix[cPid].M[index](i, j)),
-                                                      H(j, i));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+        LaunchCudaKernal_default(
+            tripletNum,
+            256,
+            0,
+            prepare_hessian_bcoo_kernel,
+            tripletNum,
+            offset,
+            levelnum,
+            d_goingNext,
+            d_inverseMatMas,
+            d_real_map_partId,
+            indices,
+            triplet_values,
+            row_ids,
+            col_ids);
 
         tripletNum    = totalMapNodes * BANKSIZE;
         int threadNum = BANKSIZE * BANKSIZE;
         int blockNum  = (tripletNum + threadNum - 1) / threadNum;
 
-        ParallelFor(blockNum, threadNum)
-            .file_line(__FILE__, __LINE__)
-            .apply(
-                tripletNum,
-                [levelNum         = levelnum,
-                 _goingNext       = d_goingNext,
-                 _invMatrix       = d_inverseMatMas,
-                 _partId_map_real = d_partId_map_real,
-                 _fineConnectMsk  = d_fineConnectMask,
-                 _prefix0 = d_prefixOriginal] __device__(int idx) mutable
-                {
-                    int HSIZE = (BANKSIZE * BANKSIZE);
-                    int Hid   = idx / HSIZE;
-                    int LMRid = (idx % HSIZE) / BANKSIZE;
-                    int LMCid = (idx % HSIZE) % BANKSIZE;
-
-                    int MRid = Hid * BANKSIZE + LMRid;
-                    int MCid = Hid * BANKSIZE + LMCid;
-
-                    int            rdx = _partId_map_real[MRid];
-                    int            cdx = _partId_map_real[MCid];
-                    __shared__ int prefix;
-
-                    if(threadIdx.x == 0)
-                    {
-                        prefix = _prefix0[Hid];
-                    }
-                    __syncthreads();
-                    Eigen::Matrix3d mat3;
-                    if(LMCid >= LMRid)
-                    {
-                        int index = BANKSIZE * LMRid - LMRid * (LMRid + 1) / 2 + LMCid;
-                        mat3 = _invMatrix[Hid].M[index];
-                    }
-                    else
-                    {
-                        int index = BANKSIZE * LMCid - LMCid * (LMCid + 1) / 2 + LMRid;
-                        mat3 = _invMatrix[Hid].M[index].transpose();
-                    }
-
-                    if((rdx >= 0) && (cdx >= 0))
-                    {
-                        if(prefix == 1)
-                        {
-                            int warpId = threadIdx.x & 0x1f;
-                            bool bBoundary = (warpId == 0) || (rdx < 0) || (cdx < 0);
-                            unsigned int mark = __ballot_sync(0xffffffff, bBoundary);
-                            mark = __brev(mark);
-                            int clzlen = __clz(mark << (warpId + 1));
-                            unsigned int interval = std::min(clzlen, 31 - warpId);
-                            for(int iter = 1; iter < 32; iter <<= 1)
-                            {
-                                Eigen::Matrix3d matTemp;
-                                for(int i = 0; i < 3; i++)
-                                {
-                                    for(int j = 0; j < 3; j++)
-                                    {
-                                        matTemp(i, j) =
-                                            __shfl_down_sync(0xffffffff, mat3(i, j), iter);
-                                    }
-                                }
-                                if(interval >= iter)
-                                {
-                                    mat3 = mat3 + matTemp;
-                                }
-                            }
-                            int level = 0;
-                            if(bBoundary)
-                            {
-                                int nextId = _goingNext[rdx];
-                                while(level < levelNum - 1)
-                                {
-                                    level++;
-                                    int cPid  = nextId / BANKSIZE;
-                                    int bvRid = nextId % BANKSIZE;
-                                    int bvCid = nextId % BANKSIZE;
-                                    int index = BANKSIZE * bvRid
-                                                - bvRid * (bvRid + 1) / 2 + bvCid;
-                                    for(int i = 0; i < 3; i++)
-                                    {
-                                        for(int j = 0; j < 3; j++)
-                                        {
-                                            atomicAdd(
-                                                &(_invMatrix[cPid].M[index](i, j)),
-                                                mat3(i, j));
-                                        }
-                                    }
-                                    nextId = _goingNext[nextId];
-                                }
-                            }
-                        }
-                        else
-                        {
-                            int level = 0;
-                            while(level < levelNum - 1)
-                            {
-                                level++;
-                                rdx      = _goingNext[rdx];
-                                cdx      = _goingNext[cdx];
-                                int cPid = cdx / BANKSIZE;
-                                if(rdx / BANKSIZE == cdx / BANKSIZE)
-                                {
-
-                                    if(cdx >= rdx)
-                                    {
-
-                                        int bvRid = rdx % BANKSIZE;
-                                        int bvCid = cdx % BANKSIZE;
-                                        int index = BANKSIZE * bvRid
-                                                    - bvRid * (bvRid + 1) / 2 + bvCid;
-
-
-                                        for(int i = 0; i < 3; i++)
-                                        {
-                                            for(int j = 0; j < 3; j++)
-                                            {
-                                                atomicAdd(&(_invMatrix[cPid].M[index](i, j)),
-                                                          mat3(i, j));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+        LaunchCudaKernal(
+            blockNum,
+            threadNum,
+            0,
+            prepare_hessian_bcoo_sum_kernel,
+            tripletNum,
+            levelnum,
+            d_goingNext,
+            d_inverseMatMas,
+            d_partId_map_real,
+            d_fineConnectMask,
+            d_prefixOriginal);
     }
     
 

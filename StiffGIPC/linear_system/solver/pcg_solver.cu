@@ -155,7 +155,7 @@ PCGSolver::PCGSolver(const PCGSolverConfig& cfg)
     : m_config(cfg)
 {
 }
-SizeT PCGSolver::solve(gipc::cuda::DenseVectorView<Float> x, gipc::cuda::CDenseVectorView<Float> b)
+SizeT PCGSolver::solve(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorView<Float> b)
 {
     Timer timer{"pcg"};
 
@@ -171,7 +171,7 @@ SizeT PCGSolver::solve(gipc::cuda::DenseVectorView<Float> x, gipc::cuda::CDenseV
 }
 
 
-SizeT PCGSolver::pcg(gipc::cuda::DenseVectorView<Float> x, gipc::cuda::CDenseVectorView<Float> b, SizeT max_iter)
+SizeT PCGSolver::pcg(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorView<Float> b, SizeT max_iter)
 {
     SizeT k = 0;
 

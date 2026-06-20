@@ -1,5 +1,5 @@
 #pragma once
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <abd_system/abd_jacobi_matrix.h>
 #include <gipc/abd_fem_count_info.h>
 #include <gipc/tet_local_info.h>
@@ -22,7 +22,7 @@ class ABDSimData
     void upload();
 
     template <typename T>
-    using DeviceBuffer = gipc::cuda::DeviceBuffer<T>;
+    using DeviceBuffer = cudatool::DeviceBuffer<T>;
 
     /*************************************************************************************************************
     *                                            Control Parameters
@@ -155,16 +155,16 @@ class ABDSimData
         DeviceBuffer<Vector12> body_id_to_abd_gravity;
     } device;
 
-    gipc::cuda::CBufferView<double3>          unique_point_id_to_position() const;
-    gipc::cuda::CBufferView<I32>              unique_point_id_to_body_id() const;
-    gipc::cuda::CBufferView<Float>            tet_id_to_volume() const;
-    gipc::cuda::CBufferView<I32>              point_id_to_unique_point_id() const;
-    gipc::cuda::CBufferView<TetLocalInfo>     tet_info() const;
-    gipc::cuda::CBufferView<I32>              tet_id_to_body_id() const;
-    gipc::cuda::CBufferView<BodyBoundaryType> body_id_to_boundary_type() const;
+    cudatool::CBufferView<double3>          unique_point_id_to_position() const;
+    cudatool::CBufferView<I32>              unique_point_id_to_body_id() const;
+    cudatool::CBufferView<Float>            tet_id_to_volume() const;
+    cudatool::CBufferView<I32>              point_id_to_unique_point_id() const;
+    cudatool::CBufferView<TetLocalInfo>     tet_info() const;
+    cudatool::CBufferView<I32>              tet_id_to_body_id() const;
+    cudatool::CBufferView<BodyBoundaryType> body_id_to_boundary_type() const;
 
   private:
-    gipc::cuda::DeviceBuffer<I32>          m_point_id_to_unique_point_id;
-    gipc::cuda::DeviceBuffer<TetLocalInfo> m_tet_info;
+    cudatool::DeviceBuffer<I32>          m_point_id_to_unique_point_id;
+    cudatool::DeviceBuffer<TetLocalInfo> m_tet_info;
 };
 }  // namespace gipc

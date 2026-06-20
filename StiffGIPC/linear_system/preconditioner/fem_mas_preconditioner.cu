@@ -30,8 +30,8 @@ void MAS_Preconditioner::assemble()
                                     collision_num);
 }
 
-void MAS_Preconditioner::apply(gipc::cuda::CDenseVectorView<Float> r,
-                              gipc::cuda::DenseVectorView<Float>  z)
+void MAS_Preconditioner::apply(cudatool::CDenseVectorView<Float> r,
+                              cudatool::DenseVectorView<Float>  z)
 {
     MAS_Prec.preconditioning((double3*)r.data(), (double3*)z.data());
 }

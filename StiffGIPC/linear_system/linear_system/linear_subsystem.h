@@ -1,9 +1,9 @@
 #pragma once
 #include <gipc/type_define.h>
-#include <gipc/cuda/all.h>
-#include <gipc/cuda/all.h>
-#include <gipc/cuda/all.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
+#include <cuda_tools/cuda_all.h>
+#include <cuda_tools/cuda_all.h>
+#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/json.h>
 
 namespace gipc
@@ -14,8 +14,8 @@ class DiagonalSubsystem;
 class ILinearSubsystem
 {
   public:
-    using DenseVectorView   = gipc::cuda::DenseVectorView<Float>;
-    using CDenseVectorView  = gipc::cuda::CDenseVectorView<Float>;
+    using DenseVectorView   = cudatool::DenseVectorView<Float>;
+    using CDenseVectorView  = cudatool::CDenseVectorView<Float>;
 
   private:
     IndexT m_hid            = 0;  // ID for the hessian block
@@ -52,7 +52,7 @@ class ILinearSubsystem
      * \brief report subsystem information 
      */
     virtual void               report_subsystem_info() = 0;
-    gipc::cuda::LinearSystemContext& ctx() const;
+    cudatool::LinearSystemContext& ctx() const;
 
   private:
     

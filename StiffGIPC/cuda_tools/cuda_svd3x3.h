@@ -1,7 +1,11 @@
 #pragma once
 #include <cuda.h>
 
-namespace gipc::cuda::eigen::details
+namespace cudatool
+{
+namespace eigen
+{
+namespace details
 {
 
 union un
@@ -1076,41 +1080,35 @@ __device__ __forceinline__ void svd3x3(float  a11,
     //s23 = Sa23.f; s31 = Sa31.f; s32 = Sa32.f;
     s33 = Sa33.f;
 }
-}  // namespace gipc::cuda::eigen::details
+}  // namespace details
 
-namespace gipc
-{
-namespace cuda
-{
-namespace eigen
-{
 namespace details
 {
-    MUDA_INLINE MUDA_DEVICE void device_svd(const Eigen::Matrix<float, 3, 3>& F,
-                                            Eigen::Matrix<float, 3, 3>&       U,
-                                            Eigen::Vector3<float>&            Sigma,
-                                            Eigen::Matrix<float, 3, 3>&       V)
+    CT_INLINE CT_DEVICE void device_svd(const Eigen::Matrix<float, 3, 3>& F,
+                                        Eigen::Matrix<float, 3, 3>&       U,
+                                        Eigen::Vector3f&            Sigma,
+                                        Eigen::Matrix<float, 3, 3>&       V)
     {
-        gipc::cuda::eigen::details::svd3x3(F(0, 0), F(0, 1), F(0, 2),
-                                           F(1, 0), F(1, 1), F(1, 2),
-                                           F(2, 0), F(2, 1), F(2, 2),
-                                           U(0, 0), U(0, 1), U(0, 2),
-                                           U(1, 0), U(1, 1), U(1, 2),
-                                           U(2, 0), U(2, 1), U(2, 2),
-                                           Sigma(0), Sigma(1), Sigma(2),
-                                           V(0, 0), V(0, 1), V(0, 2),
-                                           V(1, 0), V(1, 1), V(1, 2),
-                                           V(2, 0), V(2, 1), V(2, 2));
+        cudatool::eigen::details::svd3x3(F(0, 0), F(0, 1), F(0, 2),
+                                         F(1, 0), F(1, 1), F(1, 2),
+                                         F(2, 0), F(2, 1), F(2, 2),
+                                         U(0, 0), U(0, 1), U(0, 2),
+                                         U(1, 0), U(1, 1), U(1, 2),
+                                         U(2, 0), U(2, 1), U(2, 2),
+                                         Sigma(0), Sigma(1), Sigma(2),
+                                         V(0, 0), V(0, 1), V(0, 2),
+                                         V(1, 0), V(1, 1), V(1, 2),
+                                         V(2, 0), V(2, 1), V(2, 2));
     }
 }  // namespace details
 
-MUDA_INLINE MUDA_GENERIC void svd(const Eigen::Matrix<float, 3, 3>& F,
+CT_INLINE CT_GENERIC void svd(const Eigen::Matrix<float, 3, 3>& F,
                                   Eigen::Matrix<float, 3, 3>&       U,
-                                  Eigen::Vector3<float>&            Sigma,
+                                  Eigen::Vector3f&            Sigma,
                                   Eigen::Matrix<float, 3, 3>&       V)
 {
     using mat3 = Eigen::Matrix<float, 3, 3>;
-    using vec3 = Eigen::Vector3<float>;
+    using vec3 = Eigen::Vector3f;
 #ifdef __CUDA_ARCH__
     details::device_svd(F, U, Sigma, V);
 #else
@@ -1133,20 +1131,20 @@ MUDA_INLINE MUDA_GENERIC void svd(const Eigen::Matrix<float, 3, 3>& F,
     Sigma[2] = Sigma[2] * L(2, 2);
 }
 
-MUDA_INLINE MUDA_GENERIC void pd(const Eigen::Matrix<float, 3, 3>& F,
+CT_INLINE CT_GENERIC void pd(const Eigen::Matrix<float, 3, 3>& F,
                                  Eigen::Matrix<float, 3, 3>&       R,
                                  Eigen::Matrix<float, 3, 3>&       S)
 {
     Eigen::Matrix<float, 3, 3> U, V;
-    Eigen::Vector3<float>      Sigma;
+    Eigen::Vector3f      Sigma;
     svd(F, U, Sigma, V);
     R = U * V.transpose();
     S = V * Sigma.asDiagonal() * V.transpose();
 }
 
-MUDA_INLINE MUDA_GENERIC void svd(const Eigen::Matrix<double, 3, 3>& F,
+CT_INLINE CT_GENERIC void svd(const Eigen::Matrix<double, 3, 3>& F,
                                   Eigen::Matrix<double, 3, 3>&       U,
-                                  Eigen::Vector3<double>&            Sigma,
+                                  Eigen::Vector3d&            Sigma,
                                   Eigen::Matrix<double, 3, 3>&       V)
 {
     Eigen::Matrix3f fU;
@@ -1158,7 +1156,7 @@ MUDA_INLINE MUDA_GENERIC void svd(const Eigen::Matrix<double, 3, 3>& F,
     V     = fV.cast<double>();
 }
 
-MUDA_INLINE MUDA_GENERIC void pd(const Eigen::Matrix<double, 3, 3>& F,
+CT_INLINE CT_GENERIC void pd(const Eigen::Matrix<double, 3, 3>& F,
                                  Eigen::Matrix<double, 3, 3>&       R,
                                  Eigen::Matrix<double, 3, 3>&       S)
 {
@@ -1170,5 +1168,4 @@ MUDA_INLINE MUDA_GENERIC void pd(const Eigen::Matrix<double, 3, 3>& F,
 }
 
 }  // namespace eigen
-}  // namespace cuda
-}  // namespace gipc
+}  // namespace cudatool

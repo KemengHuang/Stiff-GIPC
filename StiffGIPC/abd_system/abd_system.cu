@@ -1,21 +1,292 @@
 #include <abd_system/abd_system.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/parallel_algorithm/transform.h>
 #include <gipc/utils/parallel_algorithm/scatter.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <Eigen/Dense>
 #include <gipc/utils/print_buffer.h>
 #include <gipc/utils/math.h>
 #include <abd_system/abd_sim_data.h>
-#include <gipc/cuda/all.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
+#include <cuda_tools/cuda_all.h>
 #include <abd_system/abd_energy.h>
 #include <gipc/tet_local_info.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/host_log.h>
+#include "cuda_tools/cuda_tools.h"
 
 namespace gipc
 {
+__global__ void setup_unique_point_mass_kernel(int                          n,
+                                               cudatool::BufferView<Float>  unique_point_mass,
+                                               cudatool::CBufferView<TetLocalInfo> tets,
+                                               cudatool::CBufferView<Float> tet_volumes,
+                                               cudatool::CBufferView<int>   point_id_to_unique_point_id,
+                                               Float                        density)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto mass       = tet_volumes[i] * density;
+    auto tet_points = tets[i].tet_point_ids();
+    for(int j = 0; j < 4; ++j)
+    {
+        auto point_id = tet_points(j);
+        auto unique_point_id = point_id_to_unique_point_id[point_id];
+        cudatool::atomic_add(&unique_point_mass[unique_point_id], mass / 4);
+    }
+}
+
+__global__ void calculate_body_mass_center_kernel1(int                          n,
+                                                   cudatool::CBufferView<Float> unique_point_mass,
+                                                   cudatool::CBufferView<double3> unique_point_position,
+                                                   cudatool::CBufferView<int>   unique_point_id_to_body_id,
+                                                   cudatool::BufferView<Float>  body_mass,
+                                                   cudatool::BufferView<Vector3> body_mass_center)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto    mass     = unique_point_mass[i];
+    auto    pos      = unique_point_position[i];
+    auto    body_id  = unique_point_id_to_body_id[i];
+    Vector3 mass_pos = mass * cudatool::eigen::as_eigen(pos);
+    cudatool::atomic_add(&body_mass[body_id], mass);
+    cudatool::eigen::atomic_add(body_mass_center[body_id], mass_pos);
+}
+
+__global__ void calculate_body_mass_center_kernel2(int                        n,
+                                                   cudatool::BufferView<Vector3> body_mass_center,
+                                                   cudatool::CBufferView<Float>  body_mass)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    body_mass_center[i] /= body_mass[i];
+}
+
+__global__ void calculate_body_mass_center_kernel3(int                          n,
+                                                   cudatool::BufferView<Vector3> body_centered_positions,
+                                                   cudatool::CBufferView<Vector3> body_mass_center,
+                                                   cudatool::CBufferView<double3> unique_point_position,
+                                                   cudatool::CBufferView<int>     unique_point_id_to_body_id)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto body_id = unique_point_id_to_body_id[i];
+    body_centered_positions[i] = cudatool::eigen::as_eigen(unique_point_position[i]) - body_mass_center[body_id];
+}
+
+__global__ void setup_J_kernel(int                          n,
+                               cudatool::CBufferView<Vector12> q,
+                               cudatool::BufferView<ABDJacobi> J,
+                               cudatool::CBufferView<double3>  unique_point_position,
+                               cudatool::CBufferView<int>      unique_point_id_to_body_id)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto    body_id = unique_point_id_to_body_id[i];
+    Vector3 pos     = cudatool::eigen::as_eigen(unique_point_position[i]);
+    auto    q_i     = q[body_id];
+
+    auto A = q_to_A(q_i);
+    auto p = q_i.segment<3>(0);
+
+    Vector3 pos0 = cudatool::eigen::inverse(A) * (pos - p);
+
+    J[i] = ABDJacobi{pos0};
+}
+
+__global__ void setup_abd_state_kernel(int                          n,
+                                       cudatool::BufferView<Vector12> q,
+                                       cudatool::BufferView<Vector12> q_v,
+                                       cudatool::CBufferView<Vector3> body_mass_center,
+                                       Vector12                       init_q_v)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    Vector12 new_q;
+
+    new_q.segment<3>(0) = body_mass_center[i];
+
+    // new_q.segment<3>(0) = Vector3{0, 0, 0};
+    new_q.segment<3>(3) = Vector3{1, 0, 0};
+    new_q.segment<3>(6) = Vector3{0, 1, 0};
+    new_q.segment<3>(9) = Vector3{0, 0, 1};
+
+    Vector12 new_qv = init_q_v;
+    //new_qv.segment<3>(0) = Vector3(0, -100, 0);
+    //new_qv.segment<3>(3) = Vector3{0, 0, 0};
+    //new_qv.segment<3>(6) = Vector3{0, 0, 0};
+    //new_qv.segment<3>(9) = Vector3{0, 0, 0};
+
+    q[i]   = new_q;
+    q_v[i] = new_qv;
+}
+
+__global__ void spawn_abd_state_kernel(int                          n,
+                                       cudatool::CBufferView<int>      body_id_to_old_body_id,
+                                       cudatool::CBufferView<Vector12> q,
+                                       cudatool::BufferView<Vector12>  temp_q,
+                                       cudatool::CBufferView<Vector12> q_v,
+                                       cudatool::BufferView<Vector12>  temp_q_v,
+                                       cudatool::CBufferView<Vector12> q_prev,
+                                       cudatool::BufferView<Vector12>  temp_q_prev,
+                                       cudatool::CBufferView<Vector12> q_tilde,
+                                       cudatool::BufferView<Vector12>  temp_q_tilde,
+                                       cudatool::CBufferView<int>      is_fixed,
+                                       cudatool::BufferView<int>       temp_is_fixed,
+                                       cudatool::CBufferView<Vector3>  body_mass_center)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto old_body_id = body_id_to_old_body_id[i];
+
+    temp_q[i]        = q[old_body_id];
+    temp_q_v[i]      = q_v[old_body_id];
+    temp_q_prev[i]   = q_prev[old_body_id];
+    temp_q_tilde[i]  = q_tilde[old_body_id];
+    temp_is_fixed[i] = is_fixed[old_body_id];
+}
+
+__global__ void setup_tet_abd_mass_kernel(int                              n,
+                                          cudatool::CBufferView<TetLocalInfo> tet_infos,
+                                          cudatool::CBufferView<int>       point_id_to_unique_point_id,
+                                          cudatool::CBufferView<ABDJacobi> jacobi,
+                                          cudatool::CBufferView<Float>     tet_volumes,
+                                          Float                            density,
+                                          cudatool::BufferView<ABDJacobiDyadicMass> tet_dyadic_mass)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto mass      = tet_volumes[i] * density;
+    auto node_mass = mass / 4;
+    ABDJacobiDyadicMass tet_mass = ABDJacobiDyadicMass::zero();
+    Vector4i tet_points = tet_infos[i].tet_point_ids();
+    for(int j = 0; j < 4; ++j)
+    {
+        auto point_id = tet_points(j);
+        auto unique_point_id = point_id_to_unique_point_id[point_id];
+        tet_mass += ABDJacobiDyadicMass{
+            node_mass, jacobi[unique_point_id].x_bar()};
+    }
+    tet_dyadic_mass[i] = tet_mass;
+}
+
+__global__ void setup_abd_dyadic_mass_kernel1(int                                    n,
+                                              cudatool::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
+                                              cudatool::CBufferView<int>                 tet_id_to_body_id,
+                                              cudatool::BufferView<ABDJacobiDyadicMass>  abd_dyadic_mass)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto  body_id = tet_id_to_body_id[i];
+    auto& dst     = abd_dyadic_mass[body_id];
+    auto& src     = tet_dyadic_mass[i];
+    ABDJacobiDyadicMass::atomic_add(dst, src);
+}
+
+__global__ void setup_abd_dyadic_mass_kernel2(int                           n,
+                                              cudatool::BufferView<Matrix12x12> abd_dyadic_mass_inv,
+                                              cudatool::CBufferView<ABDJacobiDyadicMass> abd_dyadic_mass)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    // eigen 12x12 inverse does not work in cuda kernel!!!
+    // return mass.to_mat().inverse();
+    abd_dyadic_mass_inv[i] = cudatool::eigen::inverse(abd_dyadic_mass[i].to_mat());
+}
+
+__global__ void setup_abd_volume_kernel(int                       n,
+                                        cudatool::CBufferView<int>   tet_id_to_body_id,
+                                        cudatool::CBufferView<Float> tet_volumes,
+                                        cudatool::BufferView<Float>  abd_volume)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto body_id = tet_id_to_body_id[i];
+    auto volume  = tet_volumes[i];
+    cudatool::atomic_add(&abd_volume[body_id], volume);
+}
+
+__global__ void setup_tet_abd_gravity_force_kernel(int                          n,
+                                                   Vector3                      gravity,
+                                                   cudatool::CBufferView<TetLocalInfo> tet_infos,
+                                                   cudatool::CBufferView<int>   point_id_to_unique_point_id,
+                                                   cudatool::CBufferView<ABDJacobi> jacobi,
+                                                   cudatool::CBufferView<Float> tet_volumes,
+                                                   Float                        density,
+                                                   cudatool::BufferView<Vector12> tet_abd_gravity_force)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto     mass               = tet_volumes[i] * density;
+    auto     node_mass          = mass / 4;
+    auto     node_gravity_force = node_mass * gravity;
+    Vector12 tet_gravity_force  = Vector12::Zero();
+    Vector4i tet_points = tet_infos[i].tet_point_ids();
+    for(int j = 0; j < 4; ++j)
+    {
+        auto point_id = tet_points(j);
+        auto unique_point_id = point_id_to_unique_point_id[point_id];
+        auto& J = jacobi[unique_point_id];
+        tet_gravity_force += J.T() * node_gravity_force;
+    }
+    tet_abd_gravity_force[i] = tet_gravity_force;
+}
+
+__global__ void setup_abd_gravity_kernel1(int                         n,
+                                          cudatool::CBufferView<Vector12> tet_abd_gravity_force,
+                                          cudatool::CBufferView<int>      tet_id_to_body_id,
+                                          cudatool::BufferView<Vector12>  abd_gravity_force)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto     body_id = tet_id_to_body_id[i];
+    auto&    dst     = abd_gravity_force[body_id];
+    Vector12 src     = tet_abd_gravity_force[i];
+
+    cudatool::eigen::atomic_add(dst, src);
+}
+
+__global__ void setup_abd_gravity_kernel2(int                            n,
+                                          cudatool::BufferView<Vector12>    abd_gravity,
+                                          cudatool::CBufferView<Vector12>   abd_gravity_force,
+                                          cudatool::CBufferView<Matrix12x12> abd_dyadic_mass_inv)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto gravity_force = abd_gravity_force[i];
+    auto mass_inv      = abd_dyadic_mass_inv[i];
+    auto gravity_acc   = mass_inv * gravity_force;
+    abd_gravity[i] = gravity_acc;
+}
+
 void ABDSystem::init_system(ABDSimData& sim_data)
 {
     _setup_system(true, sim_data);
@@ -28,9 +299,9 @@ void ABDSystem::rebuild_system(ABDSimData& sim_data)
     _setup_system(false, sim_data);
 }
 
-void ABDSystem::rebuild_system(ABDSimData& sim_data, gipc::cuda::CBufferView<double3> vertices)
+void ABDSystem::rebuild_system(ABDSimData& sim_data, cudatool::CBufferView<double3> vertices)
 {
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool::parallel;
 
     //Transform()
     //    .kernel_name(__FUNCTION__)
@@ -97,7 +368,7 @@ void ABDSystem::_setup_system(bool init, ABDSimData& data)
         //                 abd.body_id_to_dq);
 
         //exp3_14
-        MUDA_ERROR_WITH_LOCATION("In this version, we do not support the rebuild of ABDSystem!");
+        CT_ERROR_WITH_LOCATION("In this version, we do not support the rebuild of ABDSystem!");
     }
 
     // always rebuild J, if body is broken
@@ -139,156 +410,108 @@ void ABDSystem::_setup_system(bool init, ABDSimData& data)
 }
 
 void ABDSystem::_setup_unique_point_mass(size_t unique_point_count,
-                                         gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
-                                         gipc::cuda::CBufferView<TetLocalInfo> tets,
-                                         gipc::cuda::CBufferView<Float> tet_volumes,
+                                         cudatool::DeviceBuffer<Float>& unique_point_mass,
+                                         cudatool::CBufferView<TetLocalInfo> tets,
+                                         cudatool::CBufferView<Float> tet_volumes,
                                          Float                    density,
-                                         gipc::cuda::CBufferView<int> point_id_to_unique_point_id)
+                                         cudatool::CBufferView<int> point_id_to_unique_point_id)
 {
-    using namespace gipc::cuda;
+    using namespace cudatool;
 
     unique_point_mass.resize(unique_point_count, 0);
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(tets.size(),
-               [unique_point_mass = unique_point_mass.viewer().name("unique_point_mass"),
-                tets        = tets.viewer().name("tets"),
-                tet_volumes = tet_volumes.viewer().name("tet_volumes"),
-                point_id_to_unique_point_id =
-                    point_id_to_unique_point_id.viewer().name("point_id_to_unique_point_id"),
-                density = density] __device__(int i) mutable
-               {
-                   auto mass       = tet_volumes(i) * density;
-                   auto tet_points = tets(i).tet_point_ids();
-                   for(int j = 0; j < 4; ++j)
-                   {
-                       auto point_id = tet_points(j);
-                       auto unique_point_id = point_id_to_unique_point_id(point_id);
-                       atomic_add(&unique_point_mass(unique_point_id), mass / 4);
-                   }
-               });
+    LaunchCudaKernal_default((int)tets.size(),
+                             256,
+                             0,
+                             setup_unique_point_mass_kernel,
+                             (int)tets.size(),
+                             unique_point_mass.view(),
+                             tets,
+                             tet_volumes,
+                             point_id_to_unique_point_id,
+                             density);
 }
 
 void ABDSystem::_calculate_body_mass_center(size_t body_count,
-                                            gipc::cuda::DeviceBuffer<Float>& unique_point_mass,
-                                            gipc::cuda::CBufferView<double3> unique_point_position,
-                                            gipc::cuda::CBufferView<int> unique_point_id_to_body_id)
+                                            cudatool::DeviceBuffer<Float>& unique_point_mass,
+                                            cudatool::CBufferView<double3> unique_point_position,
+                                            cudatool::CBufferView<int> unique_point_id_to_body_id)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     body_mass.resize(body_count, 0);
     body_mass_center.resize(body_count, Vector3::Zero());
 
     // TODO: maybe we can use a parallel reduce here
-    ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(unique_point_position.size(),
-               [unique_point_mass = unique_point_mass.viewer().name("unique_point_mass"),
-                unique_point_position = unique_point_position.viewer().name("unique_point_position"),
-                unique_point_id_to_body_id =
-                    unique_point_id_to_body_id.viewer().name("unique_point_id_to_body_id"),
-                body_mass        = body_mass.viewer().name("body_mass"),
-                body_mass_center = body_mass_center.viewer().name(
-                    "body_mass_center")] __device__(int i) mutable
-               {
-                   auto    mass     = unique_point_mass(i);
-                   auto    pos      = unique_point_position(i);
-                   auto    body_id  = unique_point_id_to_body_id(i);
-                   Vector3 mass_pos = mass * eigen::as_eigen(pos);
-                   atomic_add(&body_mass(body_id), mass);
-                   eigen::atomic_add(body_mass_center(body_id), mass_pos);
-               });
+    LaunchCudaKernal_default((int)unique_point_position.size(),
+                             256,
+                             0,
+                             calculate_body_mass_center_kernel1,
+                             (int)unique_point_position.size(),
+                             unique_point_mass.view(),
+                             unique_point_position,
+                             unique_point_id_to_body_id,
+                             body_mass.view(),
+                             body_mass_center.view());
 
-    ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(body_count,
-               [body_mass_center = body_mass_center.viewer().name("body_mass_center"),
-                body_mass = body_mass.viewer().name("body_mass")] __device__(int i) mutable
-               { body_mass_center(i) /= body_mass(i); });
+    LaunchCudaKernal_default((int)body_count,
+                             256,
+                             0,
+                             calculate_body_mass_center_kernel2,
+                             (int)body_count,
+                             body_mass_center.view(),
+                             body_mass.view());
 
     m_body_centered_positions.resize(unique_point_position.size());
 
-    Transform().transform(
-        m_body_centered_positions.view(),
-        [body_mass_center = body_mass_center.viewer().name("body_mass_center"),
-         unique_point_position = unique_point_position.viewer().name("unique_point_position"),
-         unique_point_id_to_body_id = unique_point_id_to_body_id.viewer().name(
-             "unique_point_id_to_body_id")] __device__(int i) mutable -> Vector3
-        {
-            auto body_id = unique_point_id_to_body_id(i);
-            return eigen::as_eigen(unique_point_position(i)) - body_mass_center(body_id);
-        });
+    LaunchCudaKernal_default((int)unique_point_position.size(),
+                             256,
+                             0,
+                             calculate_body_mass_center_kernel3,
+                             (int)unique_point_position.size(),
+                             m_body_centered_positions.view(),
+                             body_mass_center.view(),
+                             unique_point_position,
+                             unique_point_id_to_body_id);
 }
 
-void ABDSystem::_setup_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
-                         gipc::cuda::CBufferView<double3>     unique_point_position,
-                         gipc::cuda::CBufferView<int>      unique_point_id_to_body_id,
-                         gipc::cuda::CBufferView<Vector12> q)
+void ABDSystem::_setup_J(cudatool::DeviceBuffer<ABDJacobi>& jacobi,
+                         cudatool::CBufferView<double3>     unique_point_position,
+                         cudatool::CBufferView<int>      unique_point_id_to_body_id,
+                         cudatool::CBufferView<Vector12> q)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     jacobi.resize(unique_point_id_to_body_id.size());
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(unique_point_id_to_body_id.size(),
-               [q = q.viewer().name("q"),
-                J = jacobi.viewer().name("J"),
-                unique_point_position = unique_point_position.viewer().name("unique_point_position"),
-                unique_point_id_to_body_id = unique_point_id_to_body_id.viewer().name(
-                    "unique_point_id_to_body_id")] __device__(int i) mutable
-               {
-                   auto    body_id = unique_point_id_to_body_id(i);
-                   Vector3 pos     = eigen::as_eigen(unique_point_position(i));
-                   auto    q_i     = q(body_id);
-
-                   auto A = q_to_A(q_i);
-                   auto p = q_i.segment<3>(0);
-
-                   Vector3 pos0 = gipc::cuda::eigen::inverse(A) * (pos - p);
-
-                   J(i) = ABDJacobi{pos0};
-               });
+    LaunchCudaKernal_default((int)unique_point_id_to_body_id.size(),
+                             256,
+                             0,
+                             setup_J_kernel,
+                             (int)unique_point_id_to_body_id.size(),
+                             q,
+                             jacobi.view(),
+                             unique_point_position,
+                             unique_point_id_to_body_id);
 }
 
 void ABDSystem::_setup_abd_state(size_t                        abd_count,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_temp,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_prev,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_v,
-                                 gipc::cuda::DeviceBuffer<Vector12>& dq)
+                                 cudatool::DeviceBuffer<Vector12>& q,
+                                 cudatool::DeviceBuffer<Vector12>& q_temp,
+                                 cudatool::DeviceBuffer<Vector12>& q_tilde,
+                                 cudatool::DeviceBuffer<Vector12>& q_prev,
+                                 cudatool::DeviceBuffer<Vector12>& q_v,
+                                 cudatool::DeviceBuffer<Vector12>& dq)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
 
     q.resize(abd_count, Vector12::Zero());
     q_v.resize(abd_count, Vector12::Zero());
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(abd_count,
-               [q   = q.viewer().name("q"),
-                q_v = q_v.viewer().name("q_v"),
-                body_mass_center = body_mass_center.cviewer().name("body_mass_center"),
-                init_q_v = parms.init_q_v] __device__(int i) mutable
-               {
-                   Vector12 new_q;
-
-                   new_q.segment<3>(0) = body_mass_center(i);
-
-                   // new_q.segment<3>(0) = Vector3{0, 0, 0};
-                   new_q.segment<3>(3) = Vector3{1, 0, 0};
-                   new_q.segment<3>(6) = Vector3{0, 1, 0};
-                   new_q.segment<3>(9) = Vector3{0, 0, 1};
-
-                   Vector12 new_qv = init_q_v;
-                   //new_qv.segment<3>(0) = Vector3(0, -100, 0);
-                   //new_qv.segment<3>(3) = Vector3{0, 0, 0};
-                   //new_qv.segment<3>(6) = Vector3{0, 0, 0};
-                   //new_qv.segment<3>(9) = Vector3{0, 0, 0};
-
-                   q(i)   = new_q;
-                   q_v(i) = new_qv;
-               });
+    LaunchCudaKernal_default((int)abd_count,
+                             256,
+                             0,
+                             setup_abd_state_kernel,
+                             (int)abd_count,
+                             q.view(),
+                             q_v.view(),
+                             body_mass_center.view(),
+                             parms.init_q_v);
 
 
     q_temp  = q;
@@ -300,7 +523,7 @@ void ABDSystem::_setup_abd_state(size_t                        abd_count,
 }
 
 
-MUDA_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
+CT_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
 {
     Eigen::Matrix<double, 9, 1> g1;
     g1.block<3, 1>(0, 0) = 2 * F.col(0);
@@ -360,7 +583,7 @@ MUDA_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
 
     Matrix3x3 U, V;
     Vector3   sig;
-    gipc::cuda::eigen::svd(F, U, sig, V);
+    cudatool::eigen::svd(F, U, sig, V);
 
     double f = sig.sum();
 
@@ -397,7 +620,7 @@ MUDA_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
     return H;
 }
 
-MUDA_GENERIC Vector9 flatten(const Matrix3x3& A) noexcept
+CT_GENERIC Vector9 flatten(const Matrix3x3& A) noexcept
 {
     //tex:
     //$
@@ -415,7 +638,7 @@ MUDA_GENERIC Vector9 flatten(const Matrix3x3& A) noexcept
     return column;
 }
 
-MUDA_GENERIC Matrix3x3 unflatten(const Vector9& v) noexcept
+CT_GENERIC Matrix3x3 unflatten(const Vector9& v) noexcept
 {
     //tex:
     //$
@@ -432,7 +655,7 @@ MUDA_GENERIC Matrix3x3 unflatten(const Vector9& v) noexcept
     return A;
 }
 
-MUDA_GENERIC Matrix3x3 ddot(const Matrix9x9& DRDF, const Matrix3x3& F_prime)
+CT_GENERIC Matrix3x3 ddot(const Matrix9x9& DRDF, const Matrix3x3& F_prime)
 {
     auto flatten_F = flatten(F_prime);
     flatten_F      = DRDF * flatten_F;
@@ -440,17 +663,16 @@ MUDA_GENERIC Matrix3x3 ddot(const Matrix9x9& DRDF, const Matrix3x3& F_prime)
 }
 
 
-void ABDSystem::_spawn_abd_state(gipc::cuda::CBufferView<int> body_id_to_old_body_id,
-                                 gipc::cuda::DeviceBuffer<int>& body_id_to_is_fixed,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_temp,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_tilde,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_prev,
-                                 gipc::cuda::DeviceBuffer<Vector12>& q_v,
-                                 gipc::cuda::DeviceBuffer<Vector12>& dq)
+void ABDSystem::_spawn_abd_state(cudatool::CBufferView<int>        body_id_to_old_body_id,
+                                 cudatool::DeviceBuffer<int>&      body_id_to_is_fixed,
+                                 cudatool::DeviceBuffer<Vector12>& q,
+                                 cudatool::DeviceBuffer<Vector12>& q_temp,
+                                 cudatool::DeviceBuffer<Vector12>& q_tilde,
+                                 cudatool::DeviceBuffer<Vector12>& q_prev,
+                                 cudatool::DeviceBuffer<Vector12>& q_v,
+                                 cudatool::DeviceBuffer<Vector12>& dq)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     auto new_abd_count = body_id_to_old_body_id.size();
     // spawn the q, because the q will be used in integration in next frame
     // spawn the q_v, because the q_v will be used in integration in next frame
@@ -461,31 +683,23 @@ void ABDSystem::_spawn_abd_state(gipc::cuda::CBufferView<int> body_id_to_old_bod
     m_temp_q_tilde.resize(new_abd_count);
 
 
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(new_abd_count,
-               [body_id_to_old_body_id = body_id_to_old_body_id.viewer().name("body_id_to_old_body_id"),
-                q             = q.cviewer().name("q"),
-                temp_q        = m_temp_q.viewer().name("temp_q"),
-                q_v           = q_v.cviewer().name("q_v"),
-                temp_q_v      = m_temp_q_v.viewer().name("temp_q_v"),
-                q_prev        = q_prev.cviewer().name("q_prev"),
-                temp_q_prev   = m_temp_q_prev.viewer().name("m_temp_q_prev"),
-                q_tilde       = q_tilde.cviewer().name("q_tilde"),
-                temp_q_tilde  = m_temp_q_tilde.viewer().name("m_temp_q_tilde"),
-                is_fixed      = body_id_to_is_fixed.cviewer().name("is_fixed"),
-                temp_is_fixed = m_temp_is_fixed.viewer().name("temp_is_fixed"),
-                body_mass_center = body_mass_center.cviewer().name(
-                    "body_mass_center")] __device__(int i) mutable
-               {
-                   auto old_body_id = body_id_to_old_body_id(i);
-
-                   temp_q(i)        = q(old_body_id);
-                   temp_q_v(i)      = q_v(old_body_id);
-                   temp_q_prev(i)   = q_prev(old_body_id);
-                   temp_q_tilde(i)  = q_tilde(old_body_id);
-                   temp_is_fixed(i) = is_fixed(old_body_id);
-               });
+    LaunchCudaKernal_default((int)new_abd_count,
+                             256,
+                             0,
+                             spawn_abd_state_kernel,
+                             (int)new_abd_count,
+                             body_id_to_old_body_id,
+                             q.view(),
+                             m_temp_q.view(),
+                             q_v.view(),
+                             m_temp_q_v.view(),
+                             q_prev.view(),
+                             m_temp_q_prev.view(),
+                             q_tilde.view(),
+                             m_temp_q_tilde.view(),
+                             body_id_to_is_fixed.view(),
+                             m_temp_is_fixed.view(),
+                             body_mass_center.view());
 
     // swap q and temp_q
     std::swap(q, m_temp_q);
@@ -504,11 +718,10 @@ void ABDSystem::_spawn_abd_state(gipc::cuda::CBufferView<int> body_id_to_old_bod
     dq.resize(new_abd_count, Vector12::Zero());
 }
 
-void ABDSystem::_spawn_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
-                         gipc::cuda::CBufferView<int> unique_point_to_old_unique_point)
+void ABDSystem::_spawn_J(cudatool::DeviceBuffer<ABDJacobi>& jacobi,
+                         cudatool::CBufferView<int> unique_point_to_old_unique_point)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
 
     //m_temp_jacobi.resize(unique_point_to_old_unique_point.size());
     //Transform()
@@ -524,174 +737,124 @@ void ABDSystem::_spawn_J(gipc::cuda::DeviceBuffer<ABDJacobi>& jacobi,
     //std::swap(jacobi, m_temp_jacobi);
 }
 
-void ABDSystem::_setup_tet_abd_mass(gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
-                                    gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
-                                    gipc::cuda::CBufferView<ABDJacobi> jacobi,
-                                    gipc::cuda::CBufferView<Float>     tet_volumes,
+void ABDSystem::_setup_tet_abd_mass(cudatool::CBufferView<TetLocalInfo> tet_local_info,
+                                    cudatool::CBufferView<int> point_id_to_unique_point_id,
+                                    cudatool::CBufferView<ABDJacobi> jacobi,
+                                    cudatool::CBufferView<Float>     tet_volumes,
                                     Float                        density,
-                                    gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass)
+                                    cudatool::DeviceBuffer<ABDJacobiDyadicMass>& tet_dyadic_mass)
 {
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     tet_dyadic_mass.resize(tet_local_info.size());
-    Transform()
-        .kernel_name(__FUNCTION__)
-        .transform(tet_dyadic_mass.view(),
-                   [tet_infos = tet_local_info.viewer().name("tet_infos"),
-                    point_id_to_unique_point_id =
-                        point_id_to_unique_point_id.viewer().name("point_id_to_unique_point_id"),
-                    jacobi      = jacobi.viewer().name("jacobi"),
-                    tet_volumes = tet_volumes.viewer().name("tet_volumes"),
-                    density     = density] __device__(int i)
-                   {
-                       auto mass      = tet_volumes(i) * density;
-                       auto node_mass = mass / 4;
-                       ABDJacobiDyadicMass tet_mass = ABDJacobiDyadicMass::zero();
-                       Vector4i tet_points = tet_infos(i).tet_point_ids();
-                       for(int j = 0; j < 4; ++j)
-                       {
-                           auto point_id = tet_points(j);
-                           auto unique_point_id = point_id_to_unique_point_id(point_id);
-                           tet_mass += ABDJacobiDyadicMass{
-                               node_mass, jacobi(unique_point_id).x_bar()};
-                       }
-                       return tet_mass;
-                   });
+    LaunchCudaKernal_default((int)tet_dyadic_mass.size(),
+                             256,
+                             0,
+                             setup_tet_abd_mass_kernel,
+                             (int)tet_dyadic_mass.size(),
+                             tet_local_info,
+                             point_id_to_unique_point_id,
+                             jacobi,
+                             tet_volumes,
+                             density,
+                             tet_dyadic_mass.view());
 }
 
 void ABDSystem::_setup_abd_dyadic_mass(size_t affine_body_count,
-                                       gipc::cuda::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
-                                       gipc::cuda::CBufferView<int> tet_id_to_body_id,
-                                       gipc::cuda::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
-                                       gipc::cuda::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv)
+                                       cudatool::CBufferView<ABDJacobiDyadicMass> tet_dyadic_mass,
+                                       cudatool::CBufferView<int> tet_id_to_body_id,
+                                       cudatool::DeviceBuffer<ABDJacobiDyadicMass>& abd_dyadic_mass,
+                                       cudatool::DeviceBuffer<Matrix12x12>& abd_dyadic_mass_inv)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     abd_dyadic_mass.resize(affine_body_count, ABDJacobiDyadicMass::zero());
     // TODO: maybe we can use a parallel reduce here
-    ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(tet_dyadic_mass.size(),
-               [tet_dyadic_mass = tet_dyadic_mass.viewer().name("tet_dyadic_mass"),
-                tet_id_to_body_id = tet_id_to_body_id.viewer().name("tet_id_to_body_id"),
-                abd_dyadic_mass =
-                    abd_dyadic_mass.viewer().name("abd_dyadic_mass")] __device__(int i) mutable
-               {
-                   auto  body_id = tet_id_to_body_id(i);
-                   auto& dst     = abd_dyadic_mass(body_id);
-                   auto& src     = tet_dyadic_mass(i);
-                   ABDJacobiDyadicMass::atomic_add(dst, src);
-               });
+    LaunchCudaKernal_default((int)tet_dyadic_mass.size(),
+                             256,
+                             0,
+                             setup_abd_dyadic_mass_kernel1,
+                             (int)tet_dyadic_mass.size(),
+                             tet_dyadic_mass,
+                             tet_id_to_body_id,
+                             abd_dyadic_mass.view());
 
     abd_dyadic_mass_inv.resize(affine_body_count);
-    Transform()
-        .file_line(__FILE__, __LINE__)
-        .transform(abd_dyadic_mass_inv.view(),
-                   std::as_const(abd_dyadic_mass).view(),
-                   [] __device__(const ABDJacobiDyadicMass& mass) -> Matrix12x12
-                   {
-                       // eigen 12x12 inverse does not work in cuda kernel!!!
-                       // return mass.to_mat().inverse();
-                       return inverse(mass.to_mat());
-                   });
+    LaunchCudaKernal_default((int)abd_dyadic_mass_inv.size(),
+                             256,
+                             0,
+                             setup_abd_dyadic_mass_kernel2,
+                             (int)abd_dyadic_mass_inv.size(),
+                             abd_dyadic_mass_inv.view(),
+                             cudatool::CBufferView<ABDJacobiDyadicMass>(abd_dyadic_mass.data(), abd_dyadic_mass.size()));
 }
 
 void ABDSystem::_setup_abd_volume(size_t                     affine_body_count,
-                                  gipc::cuda::CBufferView<int>     tet_id_to_body_id,
-                                  gipc::cuda::CBufferView<Float>   tet_volumes,
-                                  gipc::cuda::DeviceBuffer<Float>& abd_volume)
+                                  cudatool::CBufferView<int>     tet_id_to_body_id,
+                                  cudatool::CBufferView<Float>   tet_volumes,
+                                  cudatool::DeviceBuffer<Float>& abd_volume)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     abd_volume.resize(affine_body_count, 0);
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(tet_id_to_body_id.size(),
-               [tet_id_to_body_id = tet_id_to_body_id.viewer().name("tet_id_to_body_id"),
-                tet_volumes = tet_volumes.viewer().name("tet_volumes"),
-                abd_volume = abd_volume.viewer().name("abd_volume")] __device__(int i) mutable
-               {
-                   auto body_id = tet_id_to_body_id(i);
-                   auto volume  = tet_volumes(i);
-                   gipc::cuda::atomic_add(&abd_volume(body_id), volume);
-               });
+    LaunchCudaKernal_default((int)tet_id_to_body_id.size(),
+                             256,
+                             0,
+                             setup_abd_volume_kernel,
+                             (int)tet_id_to_body_id.size(),
+                             tet_id_to_body_id,
+                             tet_volumes,
+                             abd_volume.view());
 }
 
 void ABDSystem::_setup_tet_abd_gravity_force(const Vector3& gravity,
-                                             gipc::cuda::CBufferView<TetLocalInfo> tet_local_info,
-                                             gipc::cuda::CBufferView<int> point_id_to_unique_point_id,
-                                             gipc::cuda::CBufferView<ABDJacobi> jacobi,
-                                             gipc::cuda::CBufferView<Float> tet_volumes,
+                                             cudatool::CBufferView<TetLocalInfo> tet_local_info,
+                                             cudatool::CBufferView<int> point_id_to_unique_point_id,
+                                             cudatool::CBufferView<ABDJacobi> jacobi,
+                                             cudatool::CBufferView<Float> tet_volumes,
                                              Float density,
-                                             gipc::cuda::DeviceBuffer<Vector12>& tet_abd_gravity_force)
+                                             cudatool::DeviceBuffer<Vector12>& tet_abd_gravity_force)
 {
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     tet_abd_gravity_force.resize(tet_local_info.size());
-    Transform()
-        .kernel_name(__FUNCTION__)
-        .transform(tet_abd_gravity_force.view(),
-                   [gravity   = gravity,
-                    tet_infos = tet_local_info.viewer().name("tet_infos"),
-                    point_id_to_unique_point_id =
-                        point_id_to_unique_point_id.viewer().name("point_id_to_unique_point_id"),
-                    jacobi      = jacobi.viewer().name("jacobi"),
-                    tet_volumes = tet_volumes.viewer().name("tet_volumes"),
-                    density     = density] __device__(int i)
-                   {
-                       auto     mass               = tet_volumes(i) * density;
-                       auto     node_mass          = mass / 4;
-                       auto     node_gravity_force = node_mass * gravity;
-                       Vector12 tet_gravity_force  = Vector12::Zero();
-                       Vector4i tet_points = tet_infos(i).tet_point_ids();
-                       for(int j = 0; j < 4; ++j)
-                       {
-                           auto point_id = tet_points(j);
-                           auto unique_point_id = point_id_to_unique_point_id(point_id);
-                           auto& J = jacobi(unique_point_id);
-                           tet_gravity_force += J.T() * node_gravity_force;
-                       }
-                       return tet_gravity_force;
-                   });
+    LaunchCudaKernal_default((int)tet_abd_gravity_force.size(),
+                             256,
+                             0,
+                             setup_tet_abd_gravity_force_kernel,
+                             (int)tet_abd_gravity_force.size(),
+                             gravity,
+                             tet_local_info,
+                             point_id_to_unique_point_id,
+                             jacobi,
+                             tet_volumes,
+                             density,
+                             tet_abd_gravity_force.view());
 }
 
-void ABDSystem::_setup_abd_gravity(gipc::cuda::CBufferView<Vector12> tet_abd_gravity_force,
-                                   gipc::cuda::CBufferView<int> tet_id_to_body_id,
+void ABDSystem::_setup_abd_gravity(cudatool::CBufferView<Vector12> tet_abd_gravity_force,
+                                   cudatool::CBufferView<int> tet_id_to_body_id,
                                    size_t                 affine_body_count,
-                                   gipc::cuda::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
-                                   gipc::cuda::DeviceBuffer<Vector12>& abd_gravity)
+                                   cudatool::CBufferView<Matrix12x12> abd_dyadic_mass_inv,
+                                   cudatool::DeviceBuffer<Vector12>& abd_gravity)
 {
-    using namespace gipc::cuda;
-    using namespace gipc::cuda::parallel;
+    using namespace cudatool;
     m_temp_abd_gravity_force.resize(affine_body_count, Vector12::Zero());
 
     // TODO: maybe we can use a parallel reduce here
-    ParallelFor()
-        .kernel_name(__FUNCTION__)
-        .apply(tet_abd_gravity_force.size(),
-               [tet_abd_gravity_force = tet_abd_gravity_force.viewer().name("tet_abd_gravity_force"),
-                tet_id_to_body_id = tet_id_to_body_id.viewer().name("tet_id_to_body_id"),
-
-                abd_gravity_force = m_temp_abd_gravity_force.viewer().name(
-                    "abd_gravity_force")] __device__(int i) mutable
-               {
-                   auto     body_id = tet_id_to_body_id(i);
-                   auto&    dst     = abd_gravity_force(body_id);
-                   Vector12 src     = tet_abd_gravity_force(i);
-
-                   gipc::cuda::eigen::atomic_add(dst, src);
-               });
+    LaunchCudaKernal_default((int)tet_abd_gravity_force.size(),
+                             256,
+                             0,
+                             setup_abd_gravity_kernel1,
+                             (int)tet_abd_gravity_force.size(),
+                             tet_abd_gravity_force,
+                             tet_id_to_body_id,
+                             m_temp_abd_gravity_force.view());
 
     abd_gravity.resize(affine_body_count);
-    Transform()
-        .kernel_name(__FUNCTION__)
-        .transform(abd_gravity.view(),
-                   [abd_gravity_force = m_temp_abd_gravity_force.viewer().name("abd_gravity_force"),
-                    abd_dyadic_mass_inv = abd_dyadic_mass_inv.viewer().name(
-                        "abd_dyadic_mass_inv")] __device__(int i) -> Vector12
-                   {
-                       auto gravity_force = abd_gravity_force(i);
-                       auto mass_inv      = abd_dyadic_mass_inv(i);
-                       auto gravity_acc   = mass_inv * gravity_force;
-                       return gravity_acc;
-                   });
+    LaunchCudaKernal_default((int)abd_gravity.size(),
+                             256,
+                             0,
+                             setup_abd_gravity_kernel2,
+                             (int)abd_gravity.size(),
+                             abd_gravity.view(),
+                             cudatool::CBufferView<Vector12>(m_temp_abd_gravity_force.data(), m_temp_abd_gravity_force.size()),
+                             abd_dyadic_mass_inv);
 }
 }  // namespace gipc

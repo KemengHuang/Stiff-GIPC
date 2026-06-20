@@ -47,8 +47,8 @@ inline void cuda_safe_call_(cudaError err, const char* file_name, const int num_
 
 
 
-template <typename... Arguments>
-void LaunchCudaKernal(int gs, int bs, size_t mem, void (*f)(Arguments...), Arguments... args)
+template <typename F, typename... Arguments>
+void LaunchCudaKernal(int gs, int bs, size_t mem, F f, Arguments... args)
 {
     if(gs < 1)
         return;
@@ -70,8 +70,13 @@ void LaunchCudaKernal(int gs, int bs, size_t mem, void (*f)(Arguments...), Argum
     }
 }
 
-template <typename... Arguments>
-void LaunchCudaKernal_default(int total, int bs, size_t mem, void (*f)(Arguments...), Arguments... args)
+inline void wait_device()
+{
+    cudaDeviceSynchronize();
+}
+
+template <typename F, typename... Arguments>
+void LaunchCudaKernal_default(int total, int bs, size_t mem, F f, Arguments... args)
 {
     int gs = (total + bs - 1) / bs;
     if(gs < 1)

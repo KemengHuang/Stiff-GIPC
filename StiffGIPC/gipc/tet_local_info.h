@@ -1,7 +1,7 @@
 #pragma once
 #include <cuda_runtime_api.h>
 #include <gipc/type_define.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 namespace gipc
 {
 class TetLocalInfo
@@ -9,22 +9,22 @@ class TetLocalInfo
     int m_tet_id;
 
   public:
-    MUDA_GENERIC TetLocalInfo()
+    CT_GENERIC TetLocalInfo()
         : m_tet_id(0)
     {
     }
 
-    MUDA_GENERIC TetLocalInfo(int tet_id)
+    CT_GENERIC TetLocalInfo(int tet_id)
         : m_tet_id(tet_id)
     {
     }
 
-    MUDA_GENERIC int tet_id() const { return m_tet_id; }
-    MUDA_GENERIC int tet_point_offset() const { return m_tet_id * 4; }
-    MUDA_GENERIC int tet_edge_offset() const { return m_tet_id * 6; }
-    MUDA_GENERIC int tet_triangle_offset() const { return m_tet_id * 4; }
+    CT_GENERIC int tet_id() const { return m_tet_id; }
+    CT_GENERIC int tet_point_offset() const { return m_tet_id * 4; }
+    CT_GENERIC int tet_edge_offset() const { return m_tet_id * 6; }
+    CT_GENERIC int tet_triangle_offset() const { return m_tet_id * 4; }
 
-    MUDA_GENERIC Vector3i triangle_points_local_ids(int i) const
+    CT_GENERIC Vector3i triangle_points_local_ids(int i) const
     {
         switch(i)
         {
@@ -41,17 +41,17 @@ class TetLocalInfo
                 // 1, 2, 3
                 return Vector3i(1, 3, 2);  // for triangle normal, we need to reverse the order
             default:
-                MUDA_KERNEL_ERROR("triangle index out of range, max 4, yours=%d", i);
+                CT_KERNEL_ERROR("triangle index out of range, max 4, yours=%d", i);
                 break;
         }
     }
 
-    MUDA_GENERIC Vector3i triangle_points(int i) const
+    CT_GENERIC Vector3i triangle_points(int i) const
     {
         return triangle_points_local_ids(i) + tet_point_offset() * Vector3i ::Ones();
     }
 
-    MUDA_GENERIC Vector2i edge_point_local_ids(int i) const
+    CT_GENERIC Vector2i edge_point_local_ids(int i) const
     {
         switch(i)
         {
@@ -68,17 +68,17 @@ class TetLocalInfo
             case 5:
                 return Vector2i(2, 3);
             default:
-                MUDA_KERNEL_ERROR("edge index out of range, max 6, yours=%d", i);
+                CT_KERNEL_ERROR("edge index out of range, max 6, yours=%d", i);
                 break;
         }
     }
 
-    MUDA_GENERIC Vector2i edge_points(int i) const
+    CT_GENERIC Vector2i edge_points(int i) const
     {
         return edge_point_local_ids(i) + tet_point_offset() * Vector2i ::Ones();
     }
 
-    MUDA_GENERIC Vector3i triangle_edge_local_ids(int i) const
+    CT_GENERIC Vector3i triangle_edge_local_ids(int i) const
     {
         switch(i)
         {
@@ -91,43 +91,43 @@ class TetLocalInfo
             case 3:
                 return Vector3i(3, 4, 5);
             default:
-                MUDA_KERNEL_ERROR("triangle index out of range, max 4, yours=%d", i);
+                CT_KERNEL_ERROR("triangle index out of range, max 4, yours=%d", i);
                 break;
         }
     }
 
-    MUDA_GENERIC Vector3i triangle_edges(int i) const
+    CT_GENERIC Vector3i triangle_edges(int i) const
     {
         return triangle_edge_local_ids(i) + tet_edge_offset() * Vector3i ::Ones();
     }
 
 
-    MUDA_GENERIC Vector4i tet_points_local_ids() const
+    CT_GENERIC Vector4i tet_points_local_ids() const
     {
         return Vector4i(0, 1, 2, 3);
     }
 
-    MUDA_GENERIC Vector4i tet_point_ids() const
+    CT_GENERIC Vector4i tet_point_ids() const
     {
         return tet_points_local_ids() + tet_point_offset() * Vector4i ::Ones();
     }
 
-    MUDA_GENERIC Vector4i tet_triangle_local_ids() const
+    CT_GENERIC Vector4i tet_triangle_local_ids() const
     {
         return Vector4i(0, 1, 2, 3);
     }
 
-    MUDA_GENERIC Vector4i tet_triangle_ids() const
+    CT_GENERIC Vector4i tet_triangle_ids() const
     {
         return tet_triangle_local_ids() + tet_triangle_offset() * Vector4i ::Ones();
     }
 
-    MUDA_GENERIC Vector6i tet_edge_local_ids() const
+    CT_GENERIC Vector6i tet_edge_local_ids() const
     {
         return Vector6i(0, 1, 2, 3, 4, 5);
     }
 
-    MUDA_GENERIC Vector6i tet_edge_ids() const
+    CT_GENERIC Vector6i tet_edge_ids() const
     {
         return tet_edge_local_ids() + tet_edge_offset() * Vector6i ::Ones();
     }

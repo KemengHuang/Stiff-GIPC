@@ -1,44 +1,80 @@
-#include <gipc/cuda/all.h>
-namespace gipc::cuda::parallel
+#include <cuda_tools/cuda_all.h>
+
+namespace
 {
-//using F = double(float);
-//using T = float;
-//using U = double;
+template <typename T, typename U>
+__global__ void transform_copy_kernel(int size,
+                                      cudatool::BufferView<T>  to,
+                                      cudatool::CBufferView<U> from)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= size)
+        return;
+    to.data()[i] = from.data()[i];
+}
 
+template <typename T, typename U, typename F>
+__global__ void transform_from_kernel(int size,
+                                      cudatool::BufferView<T>  to,
+                                      cudatool::CBufferView<U> from,
+                                      F                        f)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= size)
+        return;
+    to.data()[i] = f(from.data()[i]);
+}
 
+template <typename T, typename F>
+__global__ void transform_index_kernel(int size, cudatool::BufferView<T> to, F f)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= size)
+        return;
+    to.data()[i] = f(i);
+}
+}  // namespace
+
+namespace cudatool::parallel
+{
 template <typename T, typename U>
 void Transform::transform(BufferView<T> to, CBufferView<U> from)
 {
     static_assert(std::is_constructible_v<T, U>, "T must be copyassignable to U");
-    MUDA_ASSERT(from.size() == to.size(), "transform size mismatch");
-    ParallelFor(0, stream())
-        .apply(from.size(),
-               [from, to] __device__(int i) mutable
-               { to.data()[i] = from.data()[i]; });
+    CT_ASSERT(from.size() == to.size(), "transform size mismatch");
+    LaunchCudaKernal_default(from.size(),
+                             256,
+                             0,
+                             transform_copy_kernel<T, U>,
+                             from.size(),
+                             to,
+                             from);
 }
 
 
 template <typename T, typename U, typename F>
 void Transform::transform(BufferView<T> to, CBufferView<U> from, F&& f)
 {
-    MUDA_ASSERT(from.size() == to.size(), "transform size mismatch");
-    ParallelFor(0, stream())
-        .apply(from.size(),
-               [from, to, f = std::move(f)] __device__(int i) mutable
-               {
-                   static_assert(std::is_invocable_v<F, U>, "f must be: U (T)");
-                   to.data()[i] = f(from.data()[i]);
-               });
+    CT_ASSERT(from.size() == to.size(), "transform size mismatch");
+    LaunchCudaKernal_default(from.size(),
+                             256,
+                             0,
+                             transform_from_kernel<T, U, F>,
+                             from.size(),
+                             to,
+                             from,
+                             f);
 }
+
 template <typename T, typename F>
 void Transform::transform(BufferView<T> to, F&& f)
 {
-    ParallelFor(0, stream())
-        .apply(to.size(),
-               [to, f = std::move(f)] __device__(int i) mutable
-               {
-                   static_assert(std::is_invocable_v<F, int>, "f must be: T (int)");
-                   to.data()[i] = f(i);
-               });
+    LaunchCudaKernal_default(to.size(),
+                             256,
+                             0,
+                             transform_index_kernel<T, F>,
+                             to.size(),
+                             to,
+                             f);
 }
-}  // namespace gipc::cuda::parallel
+}  // namespace cudatool::parallel

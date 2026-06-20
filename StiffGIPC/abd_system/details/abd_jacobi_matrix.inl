@@ -1,7 +1,7 @@
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 namespace gipc
 {
-MUDA_INLINE MUDA_GENERIC Vector12 operator*(const ABDJacobi::ABDJacobiT& j, const Vector3& g)
+CT_INLINE CT_GENERIC Vector12 operator*(const ABDJacobi::ABDJacobiT& j, const Vector3& g)
 {
     Vector12    g12;
     const auto& x     = j.m_j.m_x_bar;
@@ -11,7 +11,7 @@ MUDA_INLINE MUDA_GENERIC Vector12 operator*(const ABDJacobi::ABDJacobiT& j, cons
     g12.segment<3>(9) = x * g.z();
     return g12;
 }
-MUDA_INLINE MUDA_GENERIC Vector3 operator*(const ABDJacobi& j, const Vector12& q)
+CT_INLINE CT_GENERIC Vector3 operator*(const ABDJacobi& j, const Vector12& q)
 {
     const auto& t  = q.segment<3>(0);
     const auto& a1 = q.segment<3>(3);
@@ -29,7 +29,7 @@ MUDA_INLINE MUDA_GENERIC Vector3 operator*(const ABDJacobi& j, const Vector12& q
 //&   & 1 &  &  &  &  &  &  &  \bar{x}_1 & \bar{x}_2 & \bar{x}_3\\
 //\end{array}\right]
 //$$
-MUDA_INLINE MUDA_GENERIC Matrix3x12 ABDJacobi::to_mat() const
+CT_INLINE CT_GENERIC Matrix3x12 ABDJacobi::to_mat() const
 {
     Matrix3x12  ret       = Matrix3x12::Zero();
     const auto& x         = m_x_bar;
@@ -42,7 +42,7 @@ MUDA_INLINE MUDA_GENERIC Matrix3x12 ABDJacobi::to_mat() const
     return ret;
 }
 
-MUDA_INLINE MUDA_GENERIC Matrix12x12 ABDJacobi::JT_H_J(const ABDJacobiT& lhs_J_T,
+CT_INLINE CT_GENERIC Matrix12x12 ABDJacobi::JT_H_J(const ABDJacobiT& lhs_J_T,
                                                        const Matrix3x3& Hessian,
                                                        const ABDJacobi& rhs_J)
 {
@@ -90,7 +90,7 @@ MUDA_INLINE MUDA_GENERIC Matrix12x12 ABDJacobi::JT_H_J(const ABDJacobiT& lhs_J_T
     return ret;
 }
 
-MUDA_INLINE MUDA_GENERIC Vector12 operator*(const ABDJacobiDyadicMass& JTJ, const Vector12& p)
+CT_INLINE CT_GENERIC Vector12 operator*(const ABDJacobiDyadicMass& JTJ, const Vector12& p)
 {
     Vector12    ret;
     const auto& m = JTJ.m_mass;
@@ -123,7 +123,7 @@ MUDA_INLINE MUDA_GENERIC Vector12 operator*(const ABDJacobiDyadicMass& JTJ, cons
     return ret;
 }
 
-MUDA_INLINE MUDA_GENERIC ABDJacobiDyadicMass& ABDJacobiDyadicMass::operator+=(const ABDJacobiDyadicMass& rhs)
+CT_INLINE CT_GENERIC ABDJacobiDyadicMass& ABDJacobiDyadicMass::operator+=(const ABDJacobiDyadicMass& rhs)
 {
     m_mass += rhs.m_mass;
     m_mass_times_x_bar += rhs.m_mass_times_x_bar;
@@ -147,7 +147,7 @@ MUDA_INLINE MUDA_GENERIC ABDJacobiDyadicMass& ABDJacobiDyadicMass::operator+=(co
 //0 & 0 & \bar{x}_{2} & 0 & 0 & 0 & 0 & 0 & 0 & \bar{x}_{1} \bar{x}_{2} & \bar{x}_{2}^{2} & \bar{x}_{2} \bar{x}_{3}\\
 //0 & 0 & \bar{x}_{3} & 0 & 0 & 0 & 0 & 0 & 0 & \bar{x}_{1} \bar{x}_{3} & \bar{x}_{2} \bar{x}_{3} & \bar{x}_{3}^{2}\end{array}\right]
 //$$
-MUDA_INLINE MUDA_GENERIC void ABDJacobiDyadicMass::add_to(Matrix12x12& h) const
+CT_INLINE CT_GENERIC void ABDJacobiDyadicMass::add_to(Matrix12x12& h) const
 {
     // row 0 + col 0
     h(0, 0) += m_mass;
@@ -169,21 +169,21 @@ MUDA_INLINE MUDA_GENERIC void ABDJacobiDyadicMass::add_to(Matrix12x12& h) const
     h.block<3, 3>(6, 6) += m_mass_times_dyadic_x_bar;
     h.block<3, 3>(9, 9) += m_mass_times_dyadic_x_bar;
 }
-MUDA_INLINE MUDA_GENERIC Matrix12x12 ABDJacobiDyadicMass::to_mat() const
+CT_INLINE CT_GENERIC Matrix12x12 ABDJacobiDyadicMass::to_mat() const
 {
     Matrix12x12 h = Matrix12x12::Zero();
     add_to(h);
     return h;
 }
-inline MUDA_DEVICE ABDJacobiDyadicMass gipc::ABDJacobiDyadicMass::atomic_add(
+inline CT_DEVICE ABDJacobiDyadicMass gipc::ABDJacobiDyadicMass::atomic_add(
     ABDJacobiDyadicMass& dst, const ABDJacobiDyadicMass& src)
 {
     ABDJacobiDyadicMass ret;
-    auto                mass = gipc::cuda::atomic_add(&dst.m_mass, src.m_mass);
+    auto                mass = cudatool::atomic_add(&dst.m_mass, src.m_mass);
     auto                mass_times_x_bar =
-        gipc::cuda::eigen::atomic_add(dst.m_mass_times_x_bar, src.m_mass_times_x_bar);
+        cudatool::eigen::atomic_add(dst.m_mass_times_x_bar, src.m_mass_times_x_bar);
     auto mass_times_dyadic_x_bar =
-        gipc::cuda::eigen::atomic_add(dst.m_mass_times_dyadic_x_bar, src.m_mass_times_dyadic_x_bar);
+        cudatool::eigen::atomic_add(dst.m_mass_times_dyadic_x_bar, src.m_mass_times_dyadic_x_bar);
     ret.m_mass                    = mass;
     ret.m_mass_times_x_bar        = mass_times_x_bar;
     ret.m_mass_times_dyadic_x_bar = mass_times_dyadic_x_bar;

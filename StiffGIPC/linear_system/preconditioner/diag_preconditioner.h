@@ -13,10 +13,10 @@ class DiagPreconditioner : public GlobalPreconditioner
 
     virtual void assemble(GIPCTripletMatrix& global_triplets) override;
 
-    virtual void apply(gipc::cuda::CDenseVectorView<gipc::Float> r,
-                       gipc::cuda::DenseVectorView<gipc::Float>  z) override;
+    virtual void apply(cudatool::CDenseVectorView<gipc::Float> r,
+                       cudatool::DenseVectorView<gipc::Float>  z) override;
 
   private:
-    gipc::cuda::DeviceBuffer<gipc::Matrix3x3> m_diag3x3;
+    cudatool::DeviceBuffer<gipc::Matrix3x3> m_diag3x3;
 };
 }  // namespace gipc

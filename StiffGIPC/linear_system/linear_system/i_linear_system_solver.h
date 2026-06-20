@@ -1,7 +1,7 @@
 #pragma once
 #include <list>
 #include <linear_system/linear_system/linear_subsystem.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 
 namespace gipc
 {
@@ -40,19 +40,19 @@ class IterativeSolver
      * otherwise, return 0.
      * 
      */
-    virtual SizeT solve(gipc::cuda::DenseVectorView<Float>  x,
-                        gipc::cuda::CDenseVectorView<Float> b) = 0;
+    virtual SizeT solve(cudatool::DenseVectorView<Float>  x,
+                        cudatool::CDenseVectorView<Float> b) = 0;
 
-    void spmv(Float a, gipc::cuda::CDenseVectorView<Float> x, Float b, gipc::cuda::DenseVectorView<Float> y);
-    void spmv(gipc::cuda::CDenseVectorView<Float> x, gipc::cuda::DenseVectorView<Float> y)
+    void spmv(Float a, cudatool::CDenseVectorView<Float> x, Float b, cudatool::DenseVectorView<Float> y);
+    void spmv(cudatool::CDenseVectorView<Float> x, cudatool::DenseVectorView<Float> y)
     {
         spmv(1.0, x, 0.0, y);
     }
 
-    void apply_preconditioner(gipc::cuda::DenseVectorView<Float>  z,
-                              gipc::cuda::CDenseVectorView<Float> r) const;
+    void apply_preconditioner(cudatool::DenseVectorView<Float>  z,
+                              cudatool::CDenseVectorView<Float> r) const;
 
-    gipc::cuda::LinearSystemContext& ctx() const;
+    cudatool::LinearSystemContext& ctx() const;
 
   private:
     void system(GlobalLinearSystem& system) { m_system = &system; }

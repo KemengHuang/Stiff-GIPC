@@ -8,7 +8,7 @@
 
 #include "device_fem_data.cuh"
 #include "eigen_data.h"
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include "linear_system/linear_system/global_matrix.h"
 
 class MASPreconditioner

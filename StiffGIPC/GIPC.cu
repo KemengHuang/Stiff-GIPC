@@ -23,7 +23,7 @@
 #include <gipc_path.h>
 #include <gipc/utils/timer.h>
 
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 using namespace Eigen;
 #define RANK 2
 #define NEWF
@@ -9636,9 +9636,9 @@ void stepForward(double3* _vertexes,
 
 void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_boundary)
 {
-    auto vertexes = gipc::cuda::BufferView<double3>{TetMesh.vertexes, vertexNum};
-    auto vertexes_temp = gipc::cuda::BufferView<double3>{TetMesh.temp_double3Mem, vertexNum};
-    auto move_dir = gipc::cuda::BufferView<double3>{_moveDir, vertexNum};
+    auto vertexes = cudatool::BufferView<double3>{TetMesh.vertexes, vertexNum};
+    auto vertexes_temp = cudatool::BufferView<double3>{TetMesh.temp_double3Mem, vertexNum};
+    auto move_dir = cudatool::BufferView<double3>{_moveDir, vertexNum};
     if(abd_fem_count_info.fem_point_num > 0)
     {
         auto fem_vertexes = vertexes.subview(abd_fem_count_info.fem_point_offset,
@@ -9650,7 +9650,7 @@ void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_bound
         auto fem_move_dir = move_dir.subview(abd_fem_count_info.fem_point_offset,
                                              abd_fem_count_info.fem_point_num);
 
-        auto btype = gipc::cuda::BufferView<int>{TetMesh.BoundaryType, vertexNum}.subview(
+        auto btype = cudatool::BufferView<int>{TetMesh.BoundaryType, vertexNum}.subview(
             abd_fem_count_info.fem_point_offset, abd_fem_count_info.fem_point_num);
 
 
@@ -9665,7 +9665,7 @@ void GIPC::step_forward(device_TetraData& TetMesh, double alpha, bool move_bound
     if(abd_fem_count_info.abd_point_num <= 0)
         return;
 
-    auto abd_vertexes = gipc::cuda::BufferView<double3>{TetMesh.vertexes, vertexNum}.subview(
+    auto abd_vertexes = cudatool::BufferView<double3>{TetMesh.vertexes, vertexNum}.subview(
         abd_fem_count_info.abd_point_offset, abd_fem_count_info.abd_point_num);
 
     m_abd_system->step_forward(*m_abd_sim_data, abd_vertexes, alpha);
@@ -9932,7 +9932,7 @@ void GIPC::initKappa(device_TetraData& TetMesh)
 void GIPC::partitionContactHessian()
 {
 
-    gipc::cuda::DeviceRadixSort().SortPairs(gipc_global_triplet.block_hash_value(),
+    cudatool::DeviceRadixSort().SortPairs(gipc_global_triplet.block_hash_value(),
                                       gipc_global_triplet.block_sort_hash_value(),
                                       gipc_global_triplet.block_index(),
                                       gipc_global_triplet.block_sort_index(),
@@ -10107,6 +10107,77 @@ void GIPC::partitionContactHessian()
         cudaMemcpyDeviceToDevice));
 }
 
+__global__ void adjust_fem_fem_contact_indices_kernel(int                        n,
+                                                       int*                       cfem_rows,
+                                                       int*                       cfem_cols,
+                                                       gipc::Matrix3x3*           cfem_vals,
+                                                       int*                       BDType,
+                                                       int                        fem_global_hessian_index_offset)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    int row    = cfem_rows[i];
+    int col    = cfem_cols[i];
+    int btypeA = BDType[row];
+    int btypeB = BDType[col];
+    if(row <= col)
+    {
+        cfem_rows[i] = row + fem_global_hessian_index_offset;
+        cfem_cols[i] = col + fem_global_hessian_index_offset;
+        if(btypeA != 0 || btypeB != 0)
+        {
+            cfem_vals[i].setZero();
+        }
+    }
+    else
+    {
+        cfem_rows[i] = col + fem_global_hessian_index_offset;
+        cfem_cols[i] = row + fem_global_hessian_index_offset;
+        cfem_vals[i].setZero();
+    }
+}
+
+__global__ void zero_fem_boundary_hessian_kernel(int              n,
+                                                 int*             cfem_rows,
+                                                 int*             cfem_cols,
+                                                 gipc::Matrix3x3* triplet_fem,
+                                                 int*             BDType,
+                                                 int              hess_index2fem_index)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    int row    = cfem_rows[i];
+    int col    = cfem_cols[i];
+    int btypeA = BDType[row - hess_index2fem_index];
+    int btypeB = BDType[col - hess_index2fem_index];
+    if(btypeA != 0 || btypeB != 0)
+    {
+        triplet_fem[i].setZero();
+    }
+}
+
+__global__ void setup_fem_mass_triplets_kernel(int              n,
+                                               double*          mass,
+                                               int*             cfem_rows,
+                                               int*             cfem_cols,
+                                               gipc::Matrix3x3* triplet_fem,
+                                               int              fem_global_hessian_index_offset,
+                                               int              fem_pint_start,
+                                               int              abd_num)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    triplet_fem[i] = mass[i + fem_pint_start] * gipc::Matrix3x3::Identity();
+    cfem_rows[i]   = i + abd_num * 4;
+    cfem_cols[i]   = i + abd_num * 4;
+}
+
 float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
 {
     gipc::Timer timer{"cal_gradient_hessian"};
@@ -10114,7 +10185,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
     CUDA_SAFE_CALL(cudaMemset(TetMesh.fb, 0, vertexNum * sizeof(double3)));
     CUDA_SAFE_CALL(cudaMemset(TetMesh.shape_grads, 0, vertexNum * sizeof(double3)));
 
-    //gipc::cuda::BufferView<double3>{TetMesh.shape_grads, vertexNum}.fill(double3{0, 0, 0});
+    //cudatool::BufferView<double3>{TetMesh.shape_grads, vertexNum}.fill(double3{0, 0, 0});
 
 
     auto shape_grads   = TetMesh.shape_grads;
@@ -10172,7 +10243,7 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
         m_abd_system->setup_abd_system_gradient_hessian(
             *m_abd_sim_data,
             TetMesh.BoundaryType,
-            gipc::cuda::BufferView<double3>{TetMesh.fb, vertexNum}.subview(
+            cudatool::BufferView<double3>{TetMesh.fb, vertexNum}.subview(
                 abd_fem_count_info.abd_point_offset, abd_fem_count_info.abd_point_num),
             gipc_global_triplet);
     }
@@ -10180,38 +10251,20 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
     int abd_dofs = abd_fem_count_info.abd_body_num * 4;
     int fem_global_hessian_index_offset = -abd_fem_count_info.abd_point_num + abd_dofs;
     {
-        gipc::cuda::ParallelFor(256)
-            .kernel_name(__FUNCTION__)
-            .apply(gipc_global_triplet.fem_fem_contact_num,
-                   [cfem_rows = gipc_global_triplet.block_row_indices(
-                        gipc_global_triplet.h_fem_fem_contact_start_id),
-                    cfem_cols = gipc_global_triplet.block_col_indices(
-                        gipc_global_triplet.h_fem_fem_contact_start_id),
-                    cfem_vals = gipc_global_triplet.block_values(
-                        gipc_global_triplet.h_fem_fem_contact_start_id),
-                    BDType = TetMesh.BoundaryType,
-                    fem_global_hessian_index_offset] __device__(int i) mutable
-                   {
-                       int row = cfem_rows[i];
-                       int col = cfem_cols[i];
-                       int btypeA = BDType[row];
-                       int btypeB = BDType[col];
-                       if(row <= col)
-                       {
-                           cfem_rows[i] = row + fem_global_hessian_index_offset;
-                           cfem_cols[i] = col + fem_global_hessian_index_offset;
-                           if(btypeA != 0 || btypeB != 0)
-                           {
-                               cfem_vals[i].setZero();
-                           }
-                       }
-                       else
-                       {
-                           cfem_rows[i] = col + fem_global_hessian_index_offset;
-                           cfem_cols[i] = row + fem_global_hessian_index_offset;
-                           cfem_vals[i].setZero();
-                       }
-                   });
+        LaunchCudaKernal_default(
+            gipc_global_triplet.fem_fem_contact_num,
+            256,
+            0,
+            adjust_fem_fem_contact_indices_kernel,
+            gipc_global_triplet.fem_fem_contact_num,
+            gipc_global_triplet.block_row_indices(
+                gipc_global_triplet.h_fem_fem_contact_start_id),
+            gipc_global_triplet.block_col_indices(
+                gipc_global_triplet.h_fem_fem_contact_start_id),
+            gipc_global_triplet.block_values(
+                gipc_global_triplet.h_fem_fem_contact_start_id),
+            TetMesh.BoundaryType,
+            fem_global_hessian_index_offset);
     }
 
     {
@@ -10292,47 +10345,36 @@ float GIPC::computeGradientAndHessian(device_TetraData& TetMesh)
         gipc_global_triplet.global_triplet_offset += softNum;
 
         int fem_triplet_num = gipc_global_triplet.global_triplet_offset - fem_triplet_start;
-        gipc::cuda::ParallelFor()
-            .file_line(__FILE__, __LINE__)
-            .apply(fem_triplet_num,
-                   [  
-                       cfem_rows = gipc_global_triplet.block_row_indices(fem_triplet_start),
-                       cfem_cols = gipc_global_triplet.block_col_indices(fem_triplet_start),
-                       triplet_fem = gipc_global_triplet.block_values(fem_triplet_start),
-                       BDType = TetMesh.BoundaryType,
-                       hess_index2fem_index = fem_global_hessian_index_offset] __device__(int i) mutable
-                   {
-                       int row    = cfem_rows[i];
-                       int col    = cfem_cols[i];
-                       int btypeA = BDType[row - hess_index2fem_index];
-                       int btypeB = BDType[col - hess_index2fem_index];
-                       if(btypeA != 0 || btypeB != 0)
-                       {
-                           triplet_fem[i].setZero();
-                       }
-                   });
+        LaunchCudaKernal_default(
+            fem_triplet_num,
+            256,
+            0,
+            zero_fem_boundary_hessian_kernel,
+            fem_triplet_num,
+            gipc_global_triplet.block_row_indices(fem_triplet_start),
+            gipc_global_triplet.block_col_indices(fem_triplet_start),
+            gipc_global_triplet.block_values(fem_triplet_start),
+            TetMesh.BoundaryType,
+            fem_global_hessian_index_offset);
 
 
         //int massNum =
-        gipc::cuda::ParallelFor()
-            .file_line(__FILE__, __LINE__)
-            .apply(abd_fem_count_info.fem_point_num,
-                   [mass      = TetMesh.masses,
-                    cfem_rows = gipc_global_triplet.block_row_indices(
-                        gipc_global_triplet.global_triplet_offset),
-                    cfem_cols = gipc_global_triplet.block_col_indices(
-                        gipc_global_triplet.global_triplet_offset),
-                    triplet_fem = gipc_global_triplet.block_values(
-                        gipc_global_triplet.global_triplet_offset),
-                    fem_global_hessian_index_offset,
-                    fem_pint_start = abd_fem_count_info.abd_point_num,
-                    abd_num = abd_fem_count_info.abd_body_num] __device__(int i) mutable
-                   {
-                       triplet_fem[i] =
-                           mass[i + fem_pint_start] * gipc::Matrix3x3::Identity();
-                       cfem_rows[i] = i + abd_num * 4;
-                       cfem_cols[i] = i + abd_num * 4;
-                   });
+        LaunchCudaKernal_default(
+            abd_fem_count_info.fem_point_num,
+            256,
+            0,
+            setup_fem_mass_triplets_kernel,
+            abd_fem_count_info.fem_point_num,
+            TetMesh.masses,
+            gipc_global_triplet.block_row_indices(
+                gipc_global_triplet.global_triplet_offset),
+            gipc_global_triplet.block_col_indices(
+                gipc_global_triplet.global_triplet_offset),
+            gipc_global_triplet.block_values(
+                gipc_global_triplet.global_triplet_offset),
+            fem_global_hessian_index_offset,
+            abd_fem_count_info.abd_point_num,
+            abd_fem_count_info.abd_body_num);
         gipc_global_triplet.global_triplet_offset += abd_fem_count_info.fem_point_num;
 
         //cudaMemcpy(TetMesh.totalForce, contact_grads, vertexNum * sizeof(double3), cudaMemcpyDeviceToDevice);
@@ -10678,7 +10720,7 @@ bool GIPC::isIntersected(device_TetraData& TetMesh)
 
 bool GIPC::lineSearch(device_TetraData& TetMesh, double& alpha, const double& cfl_alpha)
 {
-    gipc::cuda::wait_device();
+    wait_device();
     bool   stopped       = false;
     double lastEnergyVal = computeEnergy(TetMesh);
 

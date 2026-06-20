@@ -1,5 +1,5 @@
 #include <gipc/utils/timer.h>
-#include <gipc/cuda/tools/debug_log.h>
+#include <cuda_tools/cuda_debug.h>
 namespace gipc::details
 {
 void ScopedTimer::tick()
@@ -121,7 +121,7 @@ void GlobalTimer::set_as_current()
 {
     if(m_current)
     {
-        MUDA_ASSERT(m_current->m_timer_stack.size() == 1,
+        CT_ASSERT(m_current->m_timer_stack.size() == 1,
                     "The last GlobalTimer is not finished! Still %d Timer in the Timer Stack",
                     m_current->m_timer_stack.size());
     }

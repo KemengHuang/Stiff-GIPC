@@ -22,7 +22,7 @@ Json ILinearSubsystem::as_json() const
 
 void DiagonalSubsystem::right_hand_side_dof(SizeT right_hand_side_dof)
 {
-    MUDA_ASSERT(right_hand_side_dof % 3 == 0,
+    CT_ASSERT(right_hand_side_dof % 3 == 0,
                 "In 3D, right_hand_side_dof must be a multiple of 3, yours %d.",
                 right_hand_side_dof);
     m_right_hand_side_dof = right_hand_side_dof;
@@ -48,7 +48,7 @@ Vector2i DiagonalSubsystem::dof_offset() const
 
 void DiagonalSubsystem::dof_offset(IndexT dof_offset)
 {
-    MUDA_ASSERT(dof_offset % 3 == 0, "In 3D, dof_offset must be a multiple of 3, yours %d.", dof_offset);
+    CT_ASSERT(dof_offset % 3 == 0, "In 3D, dof_offset must be a multiple of 3, yours %d.", dof_offset);
     m_dof_offset = dof_offset;
 }
 
@@ -64,7 +64,7 @@ void DiagonalSubsystem::do_retrieve_solution(CDenseVectorView dx)
     retrieve_solution(dx.subview(dof_offset()[0], right_hand_side_dof()));
 }
 
-gipc::cuda::LinearSystemContext& ILinearSubsystem::ctx() const
+cudatool::LinearSystemContext& ILinearSubsystem::ctx() const
 {
     return m_system->m_context;
 }

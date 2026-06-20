@@ -1,7 +1,7 @@
 #pragma once
 #include <gipc/type_define.h>
 
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 
 namespace gipc
 {
@@ -14,8 +14,8 @@ class Spmv
                               int*                          row_ids,
                               int*                          col_ids,
                               int                           triplet_count,
-                              gipc::cuda::CDenseVectorView<Float> x,
+                              cudatool::CDenseVectorView<Float> x,
                               Float                         b,
-                              gipc::cuda::DenseVectorView<Float>  y);
+                              cudatool::DenseVectorView<Float>  y);
 };
 }  // namespace gipc

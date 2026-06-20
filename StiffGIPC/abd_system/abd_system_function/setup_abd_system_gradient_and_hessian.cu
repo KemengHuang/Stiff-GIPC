@@ -1,6 +1,6 @@
 #include <abd_system/abd_system.h>
-#include <gipc/cuda/all.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
+#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/cuda_vec_to_eigen.h>
 #include <abd_system/abd_energy.h>
 #include <gipc/utils/math.h>
@@ -84,7 +84,7 @@ __global__ inline void moveMemory_0(T* data, int output_start, int input_start, 
 
 
 
-__global__ void write_barrier_hessian(//gipc::cuda::TripletMatrixViewer<double, 12> tripletViewer,
+__global__ void write_barrier_hessian(//cudatool::TripletMatrixViewer<double, 12> tripletViewer,
                                       Eigen::Matrix3d*        triplet,
                                       int*              rows,
                                       int*              cols,
@@ -141,9 +141,309 @@ __global__ void write_abd_body_hessian(
 }
 
 
+__device__ __host__ void make_pd(Matrix9x9& mat)
+{
+    Vector9   eigen_values;
+    Matrix9x9 eigen_vectors;
+    cudatool::eigen::evd<Float, 9>(mat, eigen_values, eigen_vectors);
+    for(int i = 0; i < 9; ++i)
+    {
+        if(eigen_values(i) < 0)
+        {
+            eigen_values(i) = 0;
+        }
+    }
+    mat = eigen_vectors * eigen_values.asDiagonal() * eigen_vectors.transpose();
+}
+
+namespace
+{
+__global__ void cal_abd_body_gradient_and_hessian_kernel(int                                  n,
+                                                         cudatool::CDense1D<BodyBoundaryType> boundary_type,
+                                                         cudatool::CDense1D<Vector12>         qs,
+                                                         cudatool::CDense1D<Vector12>         q_tildes,
+                                                         cudatool::CDense1D<Vector12>         q_prev,
+                                                         cudatool::CDense1D<ABDJacobiDyadicMass> Ms,
+                                                         cudatool::CDense1D<Float>            volumes,
+                                                         cudatool::Dense1D<Vector12>          gradients,
+                                                         cudatool::DenseVectorViewer<double>  system_gradient,
+                                                         cudatool::Dense1D<Matrix12x12>       body_hessian,
+                                                         Float                                kappa,
+                                                         Float                                dt,
+                                                         Float                                motor_speed,
+                                                         Float                                motor_strength)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    if(boundary_type(i) == BodyBoundaryType::Fixed)
+    {
+        gradients(i) = Vector12::Zero();
+        system_gradient.segment<12>(i * 12).as_eigen().setZero();
+        body_hessian(i) = Ms(i).to_mat();
+        // body_hessian(i) = Matrix12x12::Zero();
+    }
+    else
+    {
+        Matrix12x12 H = Matrix12x12::Zero();
+        Vector12    G = Vector12::Zero();
+
+        const auto& q       = qs(i);
+        const auto& q_tilde = q_tildes(i);
+        const auto& M       = Ms(i);
+
+        {  // kinetic energy
+            Vector12 dq               = (q - q_tilde);
+            Vector12 kinetic_gradient = M * dq;
+            H                         = M.to_mat();
+            G                         = kinetic_gradient;
+        }
+
+        {  // shape energy
+            const auto& volume = volumes(i);
+            auto        kvt2   = kappa * volume * dt * dt;
+            Vector9 shape_gradient = kvt2 * shape_energy_gradient(q);
+
+            Matrix9x9 shape_H = kvt2 * shape_energy_hessian(q);
+
+            // make H positive definite
+            make_pd(shape_H);
+            H.block<9, 9>(3, 3) += shape_H;
+            G.segment<9>(3) += shape_gradient;
+        }
+
+        gradients(i)                                   = G;
+        system_gradient.segment<12>(i * 12).as_eigen() = G;
+        body_hessian(i)                                = H;
+
+        if(boundary_type(i) == BodyBoundaryType::Motor)
+        {
+            Vector3 bar_x0 = Vector3::Zero();
+            Vector3 bar_x1 = Vector3::UnitX();
+            Vector3 bar_x2 = Vector3::UnitY();
+            Vector3 bar_x3 = Vector3::UnitZ();
+
+            auto mat0 = ABDJacobi{bar_x0}.to_mat();
+            auto mat1 = ABDJacobi{bar_x1}.to_mat();
+            auto mat2 = ABDJacobi{bar_x2}.to_mat();
+            auto mat3 = ABDJacobi{bar_x3}.to_mat();
+
+            Matrix12x12 J;
+            J.block<3, 12>(0, 0) = mat0;
+            J.block<3, 12>(3, 0) = mat1;
+            J.block<3, 12>(6, 0) = mat2;
+            J.block<3, 12>(9, 0) = mat3;
+
+            Matrix12x12 inv_J = cudatool::eigen::inverse(J);
+
+            auto theta_per_sec = motor_speed;
+            auto theta         = theta_per_sec * dt;
+            // rotate x2 and x3 around (x0, x1) by theta
+            auto R = Eigen::AngleAxisd(theta, Vector3::UnitX());
+
+            Vector3 x2_P = R * bar_x2;
+            Vector3 x3_P = R * bar_x3;
+
+            auto mat0_delta = ABDJacobi{Vector3::Zero()}.to_mat();
+            auto mat1_delta = ABDJacobi{Vector3::Zero()}.to_mat();
+            auto mat2_delta = ABDJacobi{x2_P - bar_x2}.to_mat();
+            auto mat3_delta = ABDJacobi{x3_P - bar_x3}.to_mat();
+
+            Matrix12x12 J_delta;
+            J_delta.block<3, 12>(0, 0) = mat0_delta;
+            J_delta.block<3, 12>(3, 0) = mat1_delta;
+            J_delta.block<3, 12>(6, 0) = mat2_delta;
+            J_delta.block<3, 12>(9, 0) = mat3_delta;
+
+            // Vector12 q_p = inv_J * J_delta * q_prev(i) + q_prev(i);
+            Vector12 q_p = inv_J * J_delta * q_tilde + q_tilde;
+            q_p.segment<3>(6).normalize();
+            q_p.segment<3>(9).normalize();
+
+            Vector12 dq      = q - q_p;
+            dq.segment<3>(0) = Vector3::Zero();
+            dq.segment<3>(3) = Vector3::Zero();
+
+            //printf("motor dq: %f %f %f %f %f %f %f %f %f %f %f %f\n",
+            //       dq(0),
+            //       dq(1),
+            //       dq(2),
+            //       dq(3),
+            //       dq(4),
+            //       dq(5),
+            //       dq(6),
+            //       dq(7),
+            //       dq(8),
+            //       dq(9),
+            //       dq(10),
+            //       dq(11));
+
+            Matrix12x12 PowMass = Matrix12x12::Zero();
+            PowMass.block<6, 6>(6, 6) =  //1000 * Matrix6x6::Identity();
+                motor_strength * Ms(i).to_mat().block<6, 6>(6, 6);
+
+
+            system_gradient.segment<12>(i * 12).as_eigen() += PowMass * dq;
+            gradients(i) += PowMass * dq;
+
+            // Power Mass
+            body_hessian(i) += PowMass;
+        }
+    }
+}
+
+__global__ void cal_abd_system_barrier_gradient_double3_kernel(int                                  n,
+                                                               cudatool::CDense1D<I32>              unique_point_id_to_body_id,
+                                                               cudatool::CDense1D<double3>          gradient,
+                                                               cudatool::Dense1D<Vector12>          affine_gradient,
+                                                               cudatool::DenseVectorViewer<double>  system_gradient,
+                                                               cudatool::CDense1D<BodyBoundaryType> is_fixed,
+                                                               cudatool::CDense1D<ABDJacobi>        J)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto  body_id = unique_point_id_to_body_id(i);
+    auto& dst     = affine_gradient(body_id);
+    auto& g       = gradient(i);
+
+    if(is_fixed(body_id) == BodyBoundaryType::Fixed)
+        return;
+
+    //printf("barrier gradient[%d]=%f %f %f\n", i, g.x, g.y, g.z);
+
+    Vector12 G = J(i).T() * Vector3{g.x, g.y, g.z};
+    cudatool::eigen::atomic_add(dst, G);
+    system_gradient.segment<12>(body_id * 12).atomic_add(G);
+}
+
+__global__ void cal_abd_system_barrier_gradient_Vector3_kernel(int                                  n,
+                                                               cudatool::CDense1D<I32>              unique_point_id_to_body_id,
+                                                               cudatool::CDense1D<Vector3>          gradient,
+                                                               cudatool::Dense1D<Vector12>          affine_gradient,
+                                                               cudatool::DenseVectorViewer<double>  system_gradient,
+                                                               cudatool::CDense1D<ABDJacobi>        J,
+                                                               cudatool::CDense1D<BodyBoundaryType> is_fixed)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto  body_id = unique_point_id_to_body_id(i);
+    auto& dst     = affine_gradient(body_id);
+    auto& g       = gradient(i);
+
+
+    if(is_fixed(body_id) == BodyBoundaryType::Fixed)
+        return;
+
+    Vector12 G = J(i).T() * g;
+
+    cudatool::eigen::atomic_add(dst, G);
+    system_gradient.segment<12>(body_id * 12).atomic_add(G);
+}
+
+__global__ void setup_abd_system_hessian_abd_fem_kernel(int                                  n,
+                                                        cudatool::CDense1D<I32>              point_to_body,
+                                                        cudatool::CDense1D<int>              btype,
+                                                        cudatool::CDense1D<ABDJacobi>        Js,
+                                                        Eigen::Matrix3d*                     triplet_out,
+                                                        int*                                 row_out,
+                                                        int*                                 col_out,
+                                                        const Eigen::Matrix3d*               abd_fem_contact,
+                                                        const int*                           abd_fem_rows,
+                                                        const int*                           abd_fem_cols,
+                                                        int                                  h_abd_fem_contact_start_id,
+                                                        cudatool::CDense1D<BodyBoundaryType> is_fixed,
+                                                        int                                  abd_body_count,
+                                                        int                                  fem_point_offset)
+{
+    int I = blockIdx.x * blockDim.x + threadIdx.x;
+    if(I >= n)
+        return;
+
+    // 1. process upper : ABD-FEM
+    {
+        auto abd_fem_H3x3 = abd_fem_contact[I];
+        auto i_abd = abd_fem_rows[I];  // global point id
+        auto j_fem = abd_fem_cols[I];  // global point id
+
+        auto local_fem_point_id = j_fem - fem_point_offset;
+
+        auto body_id = point_to_body(i_abd);  // global body id
+
+        auto local_abd_body_id = body_id;  // - abd_body_offset;
+        auto local_abd_point_id = i_abd;  // - abd_point_offset;
+        //tex: $\mathbf{J}_{3\times 12}$
+        gipc::ABDJacobi J = Js(local_abd_point_id);
+        gipc::Matrix12x3 H = J.to_mat().transpose() * abd_fem_H3x3;
+        //tex:
+        //$$
+        // \mathbf{H} = \begin{bmatrix}
+        //  \mathbf{H}_{1} \\ \mathbf{H}_{2} \\ \mathbf{H}_{3} \\ \mathbf{H}_{4}
+        //\end{bmatrix}
+        //$$
+        auto offset = 4 * I;
+        if(btype(local_fem_point_id) != 0
+           || is_fixed(body_id) == BodyBoundaryType::Fixed)
+        {
+            H.setZero();
+        }
+        for(int i = 0; i < 4; ++i)
+        {
+            triplet_out[h_abd_fem_contact_start_id + I * 4 + i] =
+                H.block<3, 3>(i * 3, 0);
+            row_out[h_abd_fem_contact_start_id + I * 4 + i] =
+                body_id * 4 + i;
+
+            col_out[h_abd_fem_contact_start_id + I * 4 + i] =
+                abd_body_count * 4 + local_fem_point_id;
+        }
+    }
+}
+
+__global__ void cal_abd_system_preconditioner_kernel1(int                            n,
+                                                      cudatool::Dense1D<Matrix12x12> P,
+                                                      const Eigen::Matrix3d*         triplet,
+                                                      const int*                     rows,
+                                                      const int*                     cols)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto row = rows[i];
+    auto H   = triplet[i];
+    auto col = cols[i];
+    //auto&& [row, col, H] = bcoo(i);
+    if(row / 4 == col / 4)
+    {
+        P(row / 4).block<3, 3>((row % 4) * 3, (col % 4) * 3) = H;
+        if(row != col)
+        {
+            P(row / 4).block<3, 3>((col % 4) * 3, (row % 4) * 3) =
+                H.transpose();
+        }
+    }
+}
+
+__global__ void cal_abd_system_preconditioner_kernel2(int                            n,
+                                                      cudatool::Dense1D<Matrix12x12> P)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n)
+        return;
+
+    auto H = P(i);
+    P(i)   = cudatool::eigen::inverse(H);
+}
+}  // namespace
+
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   GIPCTripletMatrix& global_triplets,
-                                                  gipc::cuda::CBufferView<double3> vertex_barrier_gradient)
+                                                  cudatool::CBufferView<double3> vertex_barrier_gradient)
 {
     _cal_abd_body_gradient_and_hessian(sim_data);
     _cal_abd_system_barrier_gradient(sim_data, vertex_barrier_gradient);
@@ -152,7 +452,7 @@ void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
 
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   GIPCTripletMatrix& global_triplets,
-                                                  gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient)
+                                                  cudatool::CBufferView<Vector3> vertex_barrier_gradient)
 {
     _cal_abd_body_gradient_and_hessian(sim_data);
     _cal_abd_system_barrier_gradient(sim_data, vertex_barrier_gradient);
@@ -161,7 +461,7 @@ void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
 
 void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
                                                   int*        fbtype,
-                                                  gipc::cuda::CBufferView<double3> vertex_barrier_gradient,
+                                                  cudatool::CBufferView<double3> vertex_barrier_gradient,
                                                   GIPCTripletMatrix& global_triplets)
 {
     fem_boundary_type = fbtype;
@@ -182,26 +482,12 @@ void ABDSystem::setup_abd_system_gradient_hessian(ABDSimData& sim_data,
 
 
 // file local function, make the matrix positive definite
-__device__ __host__ void make_pd(Matrix9x9& mat)
-{
-    Vector9   eigen_values;
-    Matrix9x9 eigen_vectors;
-    gipc::cuda::eigen::evd<Float, 9>(mat, eigen_values, eigen_vectors);
-    for(int i = 0; i < 9; ++i)
-    {
-        if(eigen_values(i) < 0)
-        {
-            eigen_values(i) = 0;
-        }
-    }
-    mat = eigen_vectors * eigen_values.asDiagonal() * eigen_vectors.transpose();
-}
 
 
 void ABDSystem::_cal_abd_body_gradient_and_hessian(ABDSimData& sim_data)
 {
     gipc::Timer timer("_cal_abd_body_gradient_and_hessian");
-    using namespace gipc::cuda;
+    using namespace cudatool;
     auto& abd       = sim_data.device;
     auto  N         = sim_data.abd_fem_count_info().abd_body_num;
     auto  parameter = parms;
@@ -211,146 +497,32 @@ void ABDSystem::_cal_abd_body_gradient_and_hessian(ABDSimData& sim_data)
 
     auto boundary_type = sim_data.body_id_to_boundary_type();
 
-    ParallelFor(256)
-        .kernel_name(__FUNCTION__)
-        .apply(N,
-               [boundary_type = boundary_type.cviewer().name("btype"),
-                qs            = abd.body_id_to_q.cviewer().name("q"),
-                q_tildes = abd.body_id_to_q_tilde.cviewer().name("affine_q_tilde"),
-                q_prev    = abd.body_id_to_q_prev.cviewer().name("q_prev"),
-                Ms        = abd.body_id_to_abd_mass.cviewer().name("M"),
-                volumes   = abd.body_id_to_volume.cviewer().name("volumes"),
-                gradients = abd_gradient.viewer().name("abd_gradient"),
-                system_gradient = system_gradient.viewer().name("system_gradient"),
-                body_hessian = abd_body_hessian.viewer().name("shape_hessian"),
-                kappa        = parameter.kappa,
-                dt           = parameter.dt,
-                motor_speed  = parms.motor_speed,
-                motor_strength = parms.motor_strength] __device__(int i) mutable
-               {
-                   if(boundary_type(i) == BodyBoundaryType::Fixed)
-                   {
-                       gradients(i) = Vector12::Zero();
-                       system_gradient.segment<12>(i * 12).as_eigen().setZero();
-                       body_hessian(i) = Ms(i).to_mat();
-                       // body_hessian(i) = Matrix12x12::Zero();
-                   }
-                   else
-                   {
-                       Matrix12x12 H = Matrix12x12::Zero();
-                       Vector12    G = Vector12::Zero();
-
-                       const auto& q       = qs(i);
-                       const auto& q_tilde = q_tildes(i);
-                       const auto& M       = Ms(i);
-
-                       {  // kinetic energy
-                           Vector12 dq               = (q - q_tilde);
-                           Vector12 kinetic_gradient = M * dq;
-                           H                         = M.to_mat();
-                           G                         = kinetic_gradient;
-                       }
-
-                       {  // shape energy
-                           const auto& volume = volumes(i);
-                           auto        kvt2   = kappa * volume * dt * dt;
-                           Vector9 shape_gradient = kvt2 * shape_energy_gradient(q);
-
-                           Matrix9x9 shape_H = kvt2 * shape_energy_hessian(q);
-
-                           // make H positive definite
-                           make_pd(shape_H);
-                           H.block<9, 9>(3, 3) += shape_H;
-                           G.segment<9>(3) += shape_gradient;
-                       }
-
-                       gradients(i)                                   = G;
-                       system_gradient.segment<12>(i * 12).as_eigen() = G;
-                       body_hessian(i)                                = H;
-
-                       if(boundary_type(i) == BodyBoundaryType::Motor)
-                       {
-                           Vector3 bar_x0 = Vector3::Zero();
-                           Vector3 bar_x1 = Vector3::UnitX();
-                           Vector3 bar_x2 = Vector3::UnitY();
-                           Vector3 bar_x3 = Vector3::UnitZ();
-
-                           auto mat0 = ABDJacobi{bar_x0}.to_mat();
-                           auto mat1 = ABDJacobi{bar_x1}.to_mat();
-                           auto mat2 = ABDJacobi{bar_x2}.to_mat();
-                           auto mat3 = ABDJacobi{bar_x3}.to_mat();
-
-                           Matrix12x12 J;
-                           J.block<3, 12>(0, 0) = mat0;
-                           J.block<3, 12>(3, 0) = mat1;
-                           J.block<3, 12>(6, 0) = mat2;
-                           J.block<3, 12>(9, 0) = mat3;
-
-                           Matrix12x12 inv_J = eigen::inverse(J);
-
-                           auto theta_per_sec = motor_speed;
-                           auto theta         = theta_per_sec * dt;
-                           // rotate x2 and x3 around (x0, x1) by theta
-                           auto R = Eigen::AngleAxisd(theta, Vector3::UnitX());
-
-                           Vector3 x2_P = R * bar_x2;
-                           Vector3 x3_P = R * bar_x3;
-
-                           auto mat0_delta = ABDJacobi{Vector3::Zero()}.to_mat();
-                           auto mat1_delta = ABDJacobi{Vector3::Zero()}.to_mat();
-                           auto mat2_delta = ABDJacobi{x2_P - bar_x2}.to_mat();
-                           auto mat3_delta = ABDJacobi{x3_P - bar_x3}.to_mat();
-
-                           Matrix12x12 J_delta;
-                           J_delta.block<3, 12>(0, 0) = mat0_delta;
-                           J_delta.block<3, 12>(3, 0) = mat1_delta;
-                           J_delta.block<3, 12>(6, 0) = mat2_delta;
-                           J_delta.block<3, 12>(9, 0) = mat3_delta;
-
-                           // Vector12 q_p = inv_J * J_delta * q_prev(i) + q_prev(i);
-                           Vector12 q_p = inv_J * J_delta * q_tilde + q_tilde;
-                           q_p.segment<3>(6).normalize();
-                           q_p.segment<3>(9).normalize();
-
-                           Vector12 dq      = q - q_p;
-                           dq.segment<3>(0) = Vector3::Zero();
-                           dq.segment<3>(3) = Vector3::Zero();
-
-                           //printf("motor dq: %f %f %f %f %f %f %f %f %f %f %f %f\n",
-                           //       dq(0),
-                           //       dq(1),
-                           //       dq(2),
-                           //       dq(3),
-                           //       dq(4),
-                           //       dq(5),
-                           //       dq(6),
-                           //       dq(7),
-                           //       dq(8),
-                           //       dq(9),
-                           //       dq(10),
-                           //       dq(11));
-
-                           Matrix12x12 PowMass = Matrix12x12::Zero();
-                           PowMass.block<6, 6>(6, 6) =  //1000 * Matrix6x6::Identity();
-                               motor_strength * Ms(i).to_mat().block<6, 6>(6, 6);
-
-
-                           system_gradient.segment<12>(i * 12).as_eigen() += PowMass * dq;
-                           gradients(i) += PowMass * dq;
-
-                           // Power Mass
-                           body_hessian(i) += PowMass;
-                       }
-                   }
-               });
+    LaunchCudaKernal_default((int)N,
+                             256,
+                             0,
+                             cal_abd_body_gradient_and_hessian_kernel,
+                            (int)N,
+                             boundary_type.cviewer().name("btype"),
+                             abd.body_id_to_q.cviewer().name("q"),
+                             abd.body_id_to_q_tilde.cviewer().name("affine_q_tilde"),
+                             abd.body_id_to_q_prev.cviewer().name("q_prev"),
+                             abd.body_id_to_abd_mass.cviewer().name("M"),
+                             abd.body_id_to_volume.cviewer().name("volumes"),
+                             abd_gradient.viewer().name("abd_gradient"),
+                             system_gradient.viewer().name("system_gradient"),
+                             abd_body_hessian.viewer().name("shape_hessian"),
+                             parameter.kappa,
+                             parameter.dt,
+                             parms.motor_speed,
+                             parms.motor_strength);
 }
 
 
 void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                                 gipc::cuda::CBufferView<double3> vertex_barrier_gradient)
+                                                 cudatool::CBufferView<double3> vertex_barrier_gradient)
 {
     gipc::Timer timer("_cal_abd_system_barrier_gradient");
-    using namespace gipc::cuda;
+    using namespace cudatool;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -359,35 +531,23 @@ void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
 
 
     // Barrier Part
-    ParallelFor(256)
-        .kernel_name(__FUNCTION__)
-        .apply(vertex_barrier_gradient.size(),
-               [unique_point_id_to_body_id = body_id.cviewer().name("unique_point_id_to_body_id"),
-                gradient = vertex_barrier_gradient.cviewer().name("gradient"),
-                affine_gradient = abd_gradient.viewer().name("abd_gradient"),
-                system_gradient = system_gradient.viewer().name("system_gradient"),
-                is_fixed = body_id_is_fixed.cviewer().name("is_fixed"),
-                J = abd.unique_point_id_to_J.cviewer().name("J")] __device__(int i) mutable
-               {
-                   auto  body_id = unique_point_id_to_body_id(i);
-                   auto& dst     = affine_gradient(body_id);
-                   auto& g       = gradient(i);
-
-                   if(is_fixed(body_id) == BodyBoundaryType::Fixed)
-                       return;
-
-                   //printf("barrier gradient[%d]=%f %f %f\n", i, g.x, g.y, g.z);
-
-                   Vector12 G = J(i).T() * Vector3{g.x, g.y, g.z};
-                   eigen::atomic_add(dst, G);
-                   system_gradient.segment<12>(body_id * 12).atomic_add(G);
-               });
+    LaunchCudaKernal_default((int)vertex_barrier_gradient.size(),
+                             256,
+                             0,
+                             cal_abd_system_barrier_gradient_double3_kernel,
+                            (int)vertex_barrier_gradient.size(),
+                             body_id.cviewer().name("unique_point_id_to_body_id"),
+                             vertex_barrier_gradient.cviewer().name("gradient"),
+                             abd_gradient.viewer().name("abd_gradient"),
+                             system_gradient.viewer().name("system_gradient"),
+                             body_id_is_fixed.cviewer().name("is_fixed"),
+                             abd.unique_point_id_to_J.cviewer().name("J"));
 }
 
 void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
-                                                 gipc::cuda::CBufferView<Vector3> vertex_barrier_gradient)
+                                                 cudatool::CBufferView<Vector3> vertex_barrier_gradient)
 {
-    using namespace gipc::cuda;
+    using namespace cudatool;
     auto& abd                = sim_data.device;
     auto  abd_count          = sim_data.abd_fem_count_info().abd_body_num;
     auto  unique_point_count = sim_data.abd_fem_count_info().abd_point_num;
@@ -396,36 +556,24 @@ void ABDSystem::_cal_abd_system_barrier_gradient(ABDSimData& sim_data,
 
 
     // Barrier Part
-    ParallelFor(256)
-        .kernel_name(__FUNCTION__)
-        .apply(vertex_barrier_gradient.size(),
-               [unique_point_id_to_body_id = body_id.cviewer().name("unique_point_id_to_body_id"),
-                gradient = vertex_barrier_gradient.cviewer().name("gradient"),
-                affine_gradient = abd_gradient.viewer().name("abd_gradient"),
-                system_gradient = system_gradient.viewer().name("system_gradient"),
-                J = abd.unique_point_id_to_J.cviewer().name("J"),
-                is_fixed = body_id_is_fixed.cviewer().name("is_fixed")] __device__(int i) mutable
-               {
-                   auto  body_id = unique_point_id_to_body_id(i);
-                   auto& dst     = affine_gradient(body_id);
-                   auto& g       = gradient(i);
-
-
-                   if(is_fixed(body_id) == BodyBoundaryType::Fixed)
-                       return;
-
-                   Vector12 G = J(i).T() * g;
-
-                   eigen::atomic_add(dst, G);
-                   system_gradient.segment<12>(body_id * 12).atomic_add(G);
-               });
+    LaunchCudaKernal_default((int)vertex_barrier_gradient.size(),
+                             256,
+                             0,
+                             cal_abd_system_barrier_gradient_Vector3_kernel,
+                            (int)vertex_barrier_gradient.size(),
+                             body_id.cviewer().name("unique_point_id_to_body_id"),
+                             vertex_barrier_gradient.cviewer().name("gradient"),
+                             abd_gradient.viewer().name("abd_gradient"),
+                             system_gradient.viewer().name("system_gradient"),
+                             abd.unique_point_id_to_J.cviewer().name("J"),
+                             body_id_is_fixed.cviewer().name("is_fixed"));
 }
 
 void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
                                           GIPCTripletMatrix& global_triplets)
 {
     gipc::Timer timer("_setup_abd_system_hessian");
-    using namespace gipc::cuda;
+    using namespace cudatool;
 
     if(global_triplets.abd_abd_contact_num)
     {
@@ -465,7 +613,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
     //int blockNum  = (number + threadNum - 1) / threadNum;
 
     LaunchCudaKernal_default(
-        body_hessian_size,
+        (int)body_hessian_size,
         threadNum,
         0,
         write_abd_body_hessian,
@@ -492,11 +640,11 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
         int  start_output = new_triplet_offset + h_abd_abd_contact_start_id
                            + write_offset + 10 * body_hessian_size;
 
-        LaunchCudaKernal_default(bcooNum,
+        LaunchCudaKernal_default((int)bcooNum,
                                  threadNum,
                                  0,
                                  write_barrier_hessian,
-                                 my_triplet,
+                                my_triplet,
                                  my_rows,
                                  my_cols,
                                  abd_J,
@@ -516,68 +664,29 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
         auto fem_point_offset = sim_data.abd_fem_count_info().abd_point_num;
         auto fem_count        = sim_data.abd_fem_count_info().fem_point_num;
         auto femb_type =
-            gipc::cuda::CBufferView<int>(fem_boundary_type, fem_point_offset, fem_count);
+            cudatool::CBufferView<int>(fem_boundary_type, fem_point_offset, fem_count);
 
-        ParallelFor()
-            .kernel_name(__FUNCTION__)
-            .apply(global_triplets.abd_fem_contact_num,
-                   [point_to_body = unique_point_id_to_body_id.cviewer().name("body_id"),
-                    btype = femb_type.cviewer().name("boundary_type"),
-                    Js = sim_data.device.unique_point_id_to_J.cviewer().name("Js"),
-                    triplet_out = global_triplets.block_values() + new_triplet_offset,
-                    row_out = global_triplets.block_row_indices() + new_triplet_offset,
-                    col_out = global_triplets.block_col_indices() + new_triplet_offset,
-                    abd_fem_contact = global_triplets.block_values()
-                                      + global_triplets.h_abd_fem_contact_start_id,
-
-                    abd_fem_rows = global_triplets.block_row_indices()
-                                   + global_triplets.h_abd_fem_contact_start_id,
-                    abd_fem_cols = global_triplets.block_col_indices()
-                                   + global_triplets.h_abd_fem_contact_start_id,
-                    h_abd_fem_contact_start_id,
-                    is_fixed = body_id_is_fixed.cviewer().name("is_fixed"),
-                    abd_body_count,
-                    fem_point_offset] __device__(int I) mutable
-                   {
-                       // 1. process upper : ABD-FEM
-                       {
-                           auto abd_fem_H3x3 = abd_fem_contact[I];
-                           auto i_abd = abd_fem_rows[I];  // global point id
-                           auto j_fem = abd_fem_cols[I];  // global point id
-
-                           auto local_fem_point_id = j_fem - fem_point_offset;
-
-                           auto body_id = point_to_body(i_abd);  // global body id
-
-                           auto local_abd_body_id = body_id;  // - abd_body_offset;
-                           auto local_abd_point_id = i_abd;  // - abd_point_offset;
-                           //tex: $\mathbf{J}_{3\times 12}$
-                           gipc::ABDJacobi J = Js(local_abd_point_id);
-                           gipc::Matrix12x3 H = J.to_mat().transpose() * abd_fem_H3x3;
-                           //tex:
-                           //$$
-                           // \mathbf{H} = \begin{bmatrix}
-                           //  \mathbf{H}_{1} \\ \mathbf{H}_{2} \\ \mathbf{H}_{3} \\ \mathbf{H}_{4}
-                           //\end{bmatrix}
-                           //$$
-                           auto offset = 4 * I;
-                           if(btype(local_fem_point_id) != 0
-                              || is_fixed(body_id) == BodyBoundaryType::Fixed)
-                           {
-                               H.setZero();
-                           }
-                           for(int i = 0; i < 4; ++i)
-                           {
-                               triplet_out[h_abd_fem_contact_start_id + I * 4 + i] =
-                                   H.block<3, 3>(i * 3, 0);
-                               row_out[h_abd_fem_contact_start_id + I * 4 + i] =
-                                   body_id * 4 + i;
-
-                               col_out[h_abd_fem_contact_start_id + I * 4 + i] =
-                                   abd_body_count * 4 + local_fem_point_id;
-                           }
-                       }
-                   });
+        LaunchCudaKernal_default((int)global_triplets.abd_fem_contact_num,
+                                 256,
+                                 0,
+                                 setup_abd_system_hessian_abd_fem_kernel,
+                                (int)global_triplets.abd_fem_contact_num,
+                                 unique_point_id_to_body_id.cviewer().name("body_id"),
+                                 femb_type.cviewer().name("boundary_type"),
+                                 sim_data.device.unique_point_id_to_J.cviewer().name("Js"),
+                                 global_triplets.block_values() + new_triplet_offset,
+                                 global_triplets.block_row_indices() + new_triplet_offset,
+                                 global_triplets.block_col_indices() + new_triplet_offset,
+                                 global_triplets.block_values()
+                                     + global_triplets.h_abd_fem_contact_start_id,
+                                 global_triplets.block_row_indices()
+                                     + global_triplets.h_abd_fem_contact_start_id,
+                                 global_triplets.block_col_indices()
+                                     + global_triplets.h_abd_fem_contact_start_id,
+                                 h_abd_fem_contact_start_id,
+                                 body_id_is_fixed.cviewer().name("is_fixed"),
+                                 abd_body_count,
+                                 fem_point_offset);
     }
 
     global_triplets.h_abd_abd_contact_start_id = h_abd_abd_contact_start_id;
@@ -611,7 +720,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
 
 void ABDSystem::_cal_abd_system_preconditioner(ABDSimData& sim_data)
 {
-    using namespace gipc::cuda;
+    using namespace cudatool;
     auto& abd                        = sim_data.device;
     auto  unique_point_id_to_body_id = sim_data.unique_point_id_to_body_id();
     auto  body_hessian_size = sim_data.abd_fem_count_info().abd_body_num;
@@ -622,35 +731,22 @@ void ABDSystem::_cal_abd_system_preconditioner(ABDSimData& sim_data)
     auto rows = global_triplet->block_row_indices(global_triplet->h_abd_abd_contact_start_id);
     auto cols = global_triplet->block_col_indices(global_triplet->h_abd_abd_contact_start_id);
     {
-        ParallelFor(256)
-            .kernel_name(__FUNCTION__)
-            .apply(global_triplet->abd_abd_contact_num,
-                   [P = abd_system_diag_preconditioner.viewer().name("P"), triplet, rows, cols] __device__(
-                       int i) mutable
-                   {
-                       auto row = rows[i];
-                       auto H   = triplet[i];
-                       auto col = cols[i];
-                       //auto&& [row, col, H] = bcoo(i);
-                       if(row / 4 == col / 4)
-                       {
-                           P(row / 4).block<3, 3>((row % 4) * 3, (col % 4) * 3) = H;
-                           if(row != col)
-                           {
-                               P(row / 4).block<3, 3>((col % 4) * 3, (row % 4) * 3) =
-                                   H.transpose();
-                           }
-                       }
-                   });
+        LaunchCudaKernal_default((int)global_triplet->abd_abd_contact_num,
+                                 256,
+                                 0,
+                                 cal_abd_system_preconditioner_kernel1,
+                                (int)global_triplet->abd_abd_contact_num,
+                                 abd_system_diag_preconditioner.viewer().name("P"),
+                                 triplet,
+                                 rows,
+                                 cols);
         int count = sim_data.abd_fem_count_info().abd_body_num;
-                ParallelFor(256)
-            .kernel_name(__FUNCTION__)
-            .apply(count,
-                   [P = abd_system_diag_preconditioner.viewer().name("P")] __device__(int i) mutable
-                   {
-                       auto H = P(i);
-                       P(i)   = inverse(H);
-                   });
+        LaunchCudaKernal_default((int)count,
+                                 256,
+                                 0,
+                                 cal_abd_system_preconditioner_kernel2,
+                                (int)count,
+                                 abd_system_diag_preconditioner.viewer().name("P"));
     }
 }
 }  // namespace gipc

@@ -1,6 +1,7 @@
 #include <linear_system/linear_system/global_linear_system.h>
 #include <linear_system/linear_system/i_linear_system_solver.h>
 #include <linear_system/linear_system/i_preconditioner.h>
+#include <cuda_tools/cuda_tools.h>
 #include <gipc/utils/timer.h>
 
 namespace gipc
@@ -80,7 +81,7 @@ void GlobalLinearSystem::distribute_solution()
     for(auto& subsystem : m_inner_subsystems)
         subsystem->do_retrieve_solution(x_view);
 
-    gipc::cuda::wait_device();
+    wait_device();
 }
 
 DiagonalSubsystem& GlobalLinearSystem::_create_subsystem(U<DiagonalSubsystem>&& subsystem)
@@ -115,7 +116,7 @@ LocalPreconditioner& GlobalLinearSystem::_create_preconditioner(U<LocalPrecondit
 
 GlobalPreconditioner& GlobalLinearSystem::_create_preconditioner(U<GlobalPreconditioner>&& preconditioner)
 {
-    MUDA_ASSERT(m_global_preconditioner == nullptr, "Global preconditioner already exists.");
+    CT_ASSERT(m_global_preconditioner == nullptr, "Global preconditioner already exists.");
     preconditioner->system(*this);
     m_global_preconditioner = std::move(preconditioner);
     return *m_global_preconditioner;
@@ -126,7 +127,7 @@ gipc::SizeT GlobalLinearSystem::solve_linear_system()
     bool success = build_linear_system();
     if(!success)
         return 0;
-    MUDA_ASSERT(m_solver, "Solver is null, call create_solver() to setup a solver.");
+    CT_ASSERT(m_solver, "Solver is null, call create_solver() to setup a solver.");
     auto iter = m_solver->solve(m_x, m_b);
     distribute_solution();
     return iter;
@@ -149,8 +150,8 @@ Json GlobalLinearSystem::as_json() const
     return j;
 }
 
-void GlobalLinearSystem::apply_preconditioner(gipc::cuda::DenseVectorView<Float>  z,
-                                              gipc::cuda::CDenseVectorView<Float> r)
+void GlobalLinearSystem::apply_preconditioner(cudatool::DenseVectorView<Float>  z,
+                                              cudatool::CDenseVectorView<Float> r)
 {
     // first apply global preconditioner
     if(m_global_preconditioner)
@@ -180,9 +181,9 @@ void GlobalLinearSystem::convert_new()
 
 
 void GlobalLinearSystem::spmv(Float                         a,
-                              gipc::cuda::CDenseVectorView<Float> x,
+                              cudatool::CDenseVectorView<Float> x,
                               Float                         b,
-                              gipc::cuda::DenseVectorView<Float>  y)
+                              cudatool::DenseVectorView<Float>  y)
 {
 
     m_spmv.warp_reduce_sym_spmv(a,

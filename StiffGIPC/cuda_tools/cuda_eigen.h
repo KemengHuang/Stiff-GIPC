@@ -1,68 +1,67 @@
 #pragma once
 
-#include "muda_def.h"
-#include "atomic.h"
+#include "cuda_def.h"
+#include "cuda_atomic.h"
 #include <vector_types.h>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
 
-namespace gipc {
-namespace cuda {
+namespace cudatool {
 namespace eigen {
 
 // as_eigen overloads for CUDA vector types
-#define GIPC_AS_EIGEN_VEC(TYPE, N, CT)                                                   \
-    MUDA_INLINE MUDA_GENERIC Eigen::Map<Eigen::Matrix<CT, N, 1>> as_eigen(TYPE& val)     \
+#define CT_AS_EIGEN_VEC(TYPE, N, CT)                                                   \
+    CT_INLINE CT_GENERIC Eigen::Map<Eigen::Matrix<CT, N, 1>> as_eigen(TYPE& val)         \
     {                                                                                    \
         return Eigen::Map<Eigen::Matrix<CT, N, 1>>(reinterpret_cast<CT*>(&val));         \
     }                                                                                    \
-    MUDA_INLINE MUDA_GENERIC Eigen::Map<const Eigen::Matrix<CT, N, 1>> as_eigen(const TYPE& val) \
+    CT_INLINE CT_GENERIC Eigen::Map<const Eigen::Matrix<CT, N, 1>> as_eigen(const TYPE& val) \
     {                                                                                    \
         return Eigen::Map<const Eigen::Matrix<CT, N, 1>>(reinterpret_cast<const CT*>(&val)); \
     }
 
-GIPC_AS_EIGEN_VEC(float2, 2, float)
-GIPC_AS_EIGEN_VEC(float3, 3, float)
-GIPC_AS_EIGEN_VEC(float4, 4, float)
-GIPC_AS_EIGEN_VEC(double2, 2, double)
-GIPC_AS_EIGEN_VEC(double3, 3, double)
-GIPC_AS_EIGEN_VEC(double4, 4, double)
-GIPC_AS_EIGEN_VEC(int2, 2, int)
-GIPC_AS_EIGEN_VEC(int3, 3, int)
-GIPC_AS_EIGEN_VEC(int4, 4, int)
-GIPC_AS_EIGEN_VEC(uint2, 2, unsigned int)
-GIPC_AS_EIGEN_VEC(uint3, 3, unsigned int)
-GIPC_AS_EIGEN_VEC(uint4, 4, unsigned int)
+CT_AS_EIGEN_VEC(float2, 2, float)
+CT_AS_EIGEN_VEC(float3, 3, float)
+CT_AS_EIGEN_VEC(float4, 4, float)
+CT_AS_EIGEN_VEC(double2, 2, double)
+CT_AS_EIGEN_VEC(double3, 3, double)
+CT_AS_EIGEN_VEC(double4, 4, double)
+CT_AS_EIGEN_VEC(int2, 2, int)
+CT_AS_EIGEN_VEC(int3, 3, int)
+CT_AS_EIGEN_VEC(int4, 4, int)
+CT_AS_EIGEN_VEC(uint2, 2, unsigned int)
+CT_AS_EIGEN_VEC(uint3, 3, unsigned int)
+CT_AS_EIGEN_VEC(uint4, 4, unsigned int)
 
-#undef GIPC_AS_EIGEN_VEC
+#undef CT_AS_EIGEN_VEC
 
-// atomic_add for Eigen matrices (namespace eigen)
+// atomic_add for Eigen matrices
 template <typename T, int M, int N>
-MUDA_GENERIC Eigen::Matrix<T, M, N> atomic_add(Eigen::Matrix<T, M, N>& dst,
-                                               const Eigen::Matrix<T, M, N>& src)
+CT_GENERIC Eigen::Matrix<T, M, N> atomic_add(Eigen::Matrix<T, M, N>& dst,
+                                             const Eigen::Matrix<T, M, N>& src)
 {
     Eigen::Matrix<T, M, N> ret;
     for(int j = 0; j < N; ++j)
         for(int i = 0; i < M; ++i)
-            ret(i, j) = gipc::cuda::atomic_add(&dst(i, j), src(i, j));
+            ret(i, j) = cudatool::atomic_add(&dst(i, j), src(i, j));
     return ret;
 }
 
 template <typename T, int M, int N>
-MUDA_GENERIC Eigen::Matrix<T, M, N> atomic_add(Eigen::Map<Eigen::Matrix<T, M, N>>& dst,
-                                               const Eigen::Matrix<T, M, N>& src)
+CT_GENERIC Eigen::Matrix<T, M, N> atomic_add(Eigen::Map<Eigen::Matrix<T, M, N>>& dst,
+                                             const Eigen::Matrix<T, M, N>& src)
 {
     Eigen::Matrix<T, M, N> ret;
     for(int j = 0; j < N; ++j)
         for(int i = 0; i < M; ++i)
-            ret(i, j) = gipc::cuda::atomic_add(&dst(i, j), src(i, j));
+            ret(i, j) = cudatool::atomic_add(&dst(i, j), src(i, j));
     return ret;
 }
 
 // Analytic inverses for small matrices
 template <typename T>
-MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 2, 2> inverse(const Eigen::Matrix<T, 2, 2>& m)
+CT_INLINE CT_GENERIC Eigen::Matrix<T, 2, 2> inverse(const Eigen::Matrix<T, 2, 2>& m)
 {
     Eigen::Matrix<T, 2, 2> inv;
     T det = m(0, 0) * m(1, 1) - m(0, 1) * m(1, 0);
@@ -75,7 +74,7 @@ MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 2, 2> inverse(const Eigen::Matrix<T, 2
 }
 
 template <typename T>
-MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 3, 3> inverse(const Eigen::Matrix<T, 3, 3>& m)
+CT_INLINE CT_GENERIC Eigen::Matrix<T, 3, 3> inverse(const Eigen::Matrix<T, 3, 3>& m)
 {
     Eigen::Matrix<T, 3, 3> inv;
     inv(0, 0) = m(1, 1) * m(2, 2) - m(1, 2) * m(2, 1);
@@ -92,7 +91,7 @@ MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 3, 3> inverse(const Eigen::Matrix<T, 3
 }
 
 template <typename T>
-MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 4, 4> inverse(const Eigen::Matrix<T, 4, 4>& m)
+CT_INLINE CT_GENERIC Eigen::Matrix<T, 4, 4> inverse(const Eigen::Matrix<T, 4, 4>& m)
 {
     Eigen::Matrix<T, 4, 4> inv;
     T a = m(0, 0), b = m(0, 1), c = m(0, 2), d = m(0, 3);
@@ -130,7 +129,7 @@ MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, 4, 4> inverse(const Eigen::Matrix<T, 4
 
 // Gauss-Jordan for general NxN
 template <typename T, int N>
-MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, N, N> inverse(const Eigen::Matrix<T, N, N>& m)
+CT_INLINE CT_GENERIC Eigen::Matrix<T, N, N> inverse(const Eigen::Matrix<T, N, N>& m)
 {
     Eigen::Matrix<T, N, N> a = m;
     Eigen::Matrix<T, N, N> inv = Eigen::Matrix<T, N, N>::Identity();
@@ -169,14 +168,11 @@ MUDA_INLINE MUDA_GENERIC Eigen::Matrix<T, N, N> inverse(const Eigen::Matrix<T, N
     return inv;
 }
 
-// SVD for 3x3 is provided by <gipc/cuda/svd3x3_impl.h> (host/device analytic SVD).
-// (included at the bottom of this header)
-
 // EVD for symmetric matrices
 template <typename T, int N>
-MUDA_GENERIC void evd(const Eigen::Matrix<T, N, N>& M,
-                      Eigen::Vector<T, N>&          eigen_values,
-                      Eigen::Matrix<T, N, N>&       eigen_vectors)
+CT_GENERIC void evd(const Eigen::Matrix<T, N, N>& M,
+                    Eigen::Vector<T, N>&          eigen_values,
+                    Eigen::Matrix<T, N, N>&       eigen_vectors)
 {
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<T, N, N>> eigen_solver;
     if constexpr(N <= 3)
@@ -188,9 +184,6 @@ MUDA_GENERIC void evd(const Eigen::Matrix<T, N, N>& M,
 }
 
 }  // namespace eigen
-}  // namespace cuda
-}  // namespace gipc
+}  // namespace cudatool
 
-#ifdef __CUDACC__
-#include "svd3x3_impl.h"
-#endif
+#include "cuda_svd3x3.h"

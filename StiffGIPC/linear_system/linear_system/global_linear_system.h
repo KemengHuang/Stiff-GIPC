@@ -5,7 +5,7 @@
 #include <linear_system/linear_system/linear_subsystem.h>
 #include <linear_system/linear_system/i_linear_system_solver.h>
 #include <linear_system/linear_system/i_preconditioner.h>
-#include <gipc/cuda/all.h>
+#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/json.h>
 
 
@@ -47,7 +47,7 @@ class GlobalLinearSystem
         }
         else
         {
-            MUDA_ASSERT(false, "Unknown type");
+            CT_ASSERT(false, "Unknown type");
         }
     }
 
@@ -73,9 +73,9 @@ class GlobalLinearSystem
     U<GlobalPreconditioner>             m_global_preconditioner;
     U<IterativeSolver>                  m_solver;
 
-    gipc::cuda::LinearSystemContext      m_context;
-    gipc::cuda::DeviceDenseVector<Float> m_x;
-    gipc::cuda::DeviceDenseVector<Float> m_b;
+    cudatool::LinearSystemContext      m_context;
+    cudatool::DeviceDenseVector<Float> m_x;
+    cudatool::DeviceDenseVector<Float> m_b;
 
     std::vector<SizeT> m_rhs_count_per_subsystem;
     std::vector<SizeT> m_rhs_offset_per_subsystem;
@@ -84,17 +84,17 @@ class GlobalLinearSystem
     size_t                         reserved_triplet_count = 0;
     Spmv                           m_spmv;
     Converter                      m_converter;
-    gipc::cuda::DeviceDenseVector<Float> fake_y;
+    cudatool::DeviceDenseVector<Float> fake_y;
 
 
     bool build_linear_system();
     void distribute_solution();
-    void apply_preconditioner(gipc::cuda::DenseVectorView<Float>  z,
-                              gipc::cuda::CDenseVectorView<Float> r);
+    void apply_preconditioner(cudatool::DenseVectorView<Float>  z,
+                              cudatool::CDenseVectorView<Float> r);
 
     void convert_new();
 
-    void spmv(Float a, gipc::cuda::CDenseVectorView<Float> x, Float b, gipc::cuda::DenseVectorView<Float> y);
+    void spmv(Float a, cudatool::CDenseVectorView<Float> x, Float b, cudatool::DenseVectorView<Float> y);
 
     DiagonalSubsystem& _create_subsystem(U<DiagonalSubsystem>&& subsystem);
 

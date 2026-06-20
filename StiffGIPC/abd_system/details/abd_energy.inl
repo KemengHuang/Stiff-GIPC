@@ -6,7 +6,7 @@ namespace gipc
 // \frac{V_{\perp}}{\kappa v} =\sum\left(a_{i} \cdot a_{i}-1\right)^{2}
 // +\sum_{i \neq j}\left(a_{i} \cdot a_{j}\right)^{2}
 //$$
-MUDA_INLINE MUDA_GENERIC Float shape_energy(const Vector12& q)
+CT_INLINE CT_GENERIC Float shape_energy(const Vector12& q)
 {
     Float       ret = 0.0;
     auto a1  = q.segment<3>(3);
@@ -30,7 +30,7 @@ MUDA_INLINE MUDA_GENERIC Float shape_energy(const Vector12& q)
 // $$\frac{1}{\kappa v}\frac{\partial V_{\perp}}{\partial a_{i}}=
 //2 \left(2\left(a_{i} \cdot a_{i}-1\right) a_{i}
 //+ \sum a_{j}  (a_{j} \cdot a_{i})\right)$$
-MUDA_INLINE MUDA_GENERIC Vector9 shape_energy_gradient(const Vector12& q)
+CT_INLINE CT_GENERIC Vector9 shape_energy_gradient(const Vector12& q)
 {
     Vector9 ret;
 
@@ -55,7 +55,7 @@ MUDA_INLINE MUDA_GENERIC Vector9 shape_energy_gradient(const Vector12& q)
 }
 
 
-MUDA_INLINE MUDA_GENERIC void ddV_ddai(Matrix3x3& ddV_ddai,
+CT_INLINE CT_GENERIC void ddV_ddai(Matrix3x3& ddV_ddai,
                                        const Eigen::VectorBlock<const Vector12, 3>& ai,
                                        const Eigen::VectorBlock<const Vector12, 3>& aj,
                                        const Eigen::VectorBlock<const Vector12, 3>& ak)
@@ -65,7 +65,7 @@ MUDA_INLINE MUDA_GENERIC void ddV_ddai(Matrix3x3& ddV_ddai,
                + 4.0 * aj * aj.transpose() + 4.0 * ak * ak.transpose();
 }
 
-MUDA_INLINE MUDA_GENERIC void ddV_daidaj(Matrix3x3& ddV_daidaj,
+CT_INLINE CT_GENERIC void ddV_daidaj(Matrix3x3& ddV_daidaj,
                                          const Eigen::VectorBlock<const Vector12, 3>& ai,
                                          const Eigen::VectorBlock<const Vector12, 3>& aj,
                                          const Eigen::VectorBlock<const Vector12, 3>& ak)
@@ -73,7 +73,7 @@ MUDA_INLINE MUDA_GENERIC void ddV_daidaj(Matrix3x3& ddV_daidaj,
     ddV_daidaj = 4.0 * aj * ai.transpose() + 4.0 * ai.dot(aj) * Matrix3x3::Identity();
 }
 
-MUDA_INLINE MUDA_GENERIC void shape_energy_hessian(const Vector12& q,
+CT_INLINE CT_GENERIC void shape_energy_hessian(const Vector12& q,
                                                    Matrix3x3&      ddVdda1,
                                                    Matrix3x3&      ddVdda2,
                                                    Matrix3x3&      ddVdda3,
@@ -94,7 +94,7 @@ MUDA_INLINE MUDA_GENERIC void shape_energy_hessian(const Vector12& q,
     ddV_daidaj(ddVda2da3, a2, a3, a1);
 }
 
-MUDA_GENERIC MUDA_INLINE gipc::Matrix9x9 shape_energy_hessian(const Vector12& q)
+CT_GENERIC CT_INLINE gipc::Matrix9x9 shape_energy_hessian(const Vector12& q)
 {
     Matrix9x9 H = Matrix9x9::Zero();
 
@@ -126,7 +126,7 @@ MUDA_GENERIC MUDA_INLINE gipc::Matrix9x9 shape_energy_hessian(const Vector12& q)
     return H;
 }
 
-MUDA_INLINE MUDA_GENERIC Matrix3x3 q_to_A(const Vector12& q)
+CT_INLINE CT_GENERIC Matrix3x3 q_to_A(const Vector12& q)
 {
     Matrix3x3 A = Matrix3x3::Zero();
     A.row(0)    = q.segment<3>(3);
@@ -135,7 +135,7 @@ MUDA_INLINE MUDA_GENERIC Matrix3x3 q_to_A(const Vector12& q)
     return A;
 }
 
-MUDA_INLINE MUDA_GENERIC Vector9 A_to_q(const Matrix3x3& A)
+CT_INLINE CT_GENERIC Vector9 A_to_q(const Matrix3x3& A)
 {
     Vector9 q       = Vector9::Zero();
     q.segment<3>(0) = A.row(0);
@@ -144,7 +144,7 @@ MUDA_INLINE MUDA_GENERIC Vector9 A_to_q(const Matrix3x3& A)
     return q;
 }
 
-MUDA_INLINE MUDA_GENERIC Vector9 F_to_A(const Vector9& F)
+CT_INLINE CT_GENERIC Vector9 F_to_A(const Vector9& F)
 {
     Vector9 A;
     A(0) = F(0);
@@ -159,7 +159,7 @@ MUDA_INLINE MUDA_GENERIC Vector9 F_to_A(const Vector9& F)
     return A;
 }
 
-MUDA_INLINE MUDA_GENERIC Matrix9x9 HF_to_HA(const Matrix9x9& HF)
+CT_INLINE CT_GENERIC Matrix9x9 HF_to_HA(const Matrix9x9& HF)
 {
     Matrix9x9 HA;
     HA(0, 0) = HF(0, 0);
@@ -246,7 +246,7 @@ MUDA_INLINE MUDA_GENERIC Matrix9x9 HF_to_HA(const Matrix9x9& HF)
     return HA;
 }
 
-MUDA_GENERIC MUDA_INLINE Float computeEnergy_CDMPM(Matrix3x3 F, double u, double r, double g)
+CT_GENERIC CT_INLINE Float computeEnergy_CDMPM(Matrix3x3 F, double u, double r, double g)
 {
     double J = F.determinant();
 
@@ -269,7 +269,7 @@ MUDA_GENERIC MUDA_INLINE Float computeEnergy_CDMPM(Matrix3x3 F, double u, double
     return energy;
 }
 
-MUDA_GENERIC void energy_grad_mu(double F1_1,
+CT_GENERIC void energy_grad_mu(double F1_1,
                                  double F1_2,
                                  double F1_3,
                                  double F2_1,
@@ -281,7 +281,7 @@ MUDA_GENERIC void energy_grad_mu(double F1_1,
                                  double mu,
                                  double grad_mu[9]);
 
-MUDA_GENERIC void energy_Hess_mu(double F1_1,
+CT_GENERIC void energy_Hess_mu(double F1_1,
                                  double F1_2,
                                  double F1_3,
                                  double F2_1,
@@ -293,7 +293,7 @@ MUDA_GENERIC void energy_Hess_mu(double F1_1,
                                  double mu,
                                  double Hess_mu[81]);
 
-MUDA_GENERIC void energy_grad_k(double F1_1,
+CT_GENERIC void energy_grad_k(double F1_1,
                                 double F1_2,
                                 double F1_3,
                                 double F2_1,
@@ -305,7 +305,7 @@ MUDA_GENERIC void energy_grad_k(double F1_1,
                                 double k,
                                 double grad_k[9]);
 
-MUDA_GENERIC void energy_Hess_k(double F1_1,
+CT_GENERIC void energy_Hess_k(double F1_1,
                                 double F1_2,
                                 double F1_3,
                                 double F2_1,
@@ -317,7 +317,7 @@ MUDA_GENERIC void energy_Hess_k(double F1_1,
                                 double k,
                                 double Hess_k[81]);
 
-MUDA_GENERIC MUDA_INLINE Vector9 to_vec(Matrix3x3 F)
+CT_GENERIC CT_INLINE Vector9 to_vec(Matrix3x3 F)
 {
     const int cols = F.cols();
     const int rows = F.rows();
@@ -333,7 +333,7 @@ MUDA_GENERIC MUDA_INLINE Vector9 to_vec(Matrix3x3 F)
     return result;
 }
 
-MUDA_GENERIC MUDA_INLINE void computeGradientAndHessian_CDMPM(
+CT_GENERIC CT_INLINE void computeGradientAndHessian_CDMPM(
     Matrix3x3 F, double mu, double r, double g, Vector9& gradient, Matrix9x9& hessian)
 {
     // using namespace Eigen;
@@ -425,7 +425,7 @@ MUDA_GENERIC MUDA_INLINE void computeGradientAndHessian_CDMPM(
 // clang-format off
 namespace gipc
 {
-MUDA_GENERIC MUDA_INLINE void energy_grad_mu(double F1_1,
+CT_GENERIC CT_INLINE void energy_grad_mu(double F1_1,
                                  double F1_2,
                                  double F1_3,
                                  double F2_1,
@@ -596,7 +596,7 @@ MUDA_GENERIC MUDA_INLINE void energy_grad_mu(double F1_1,
 }
 
 
-MUDA_GENERIC MUDA_INLINE void energy_Hess_mu(double F1_1,
+CT_GENERIC CT_INLINE void energy_Hess_mu(double F1_1,
                                  double F1_2,
                                  double F1_3,
                                  double F2_1,
@@ -1549,7 +1549,7 @@ MUDA_GENERIC MUDA_INLINE void energy_Hess_mu(double F1_1,
 }
 
 
-MUDA_GENERIC MUDA_INLINE void energy_grad_k(double F1_1,
+CT_GENERIC CT_INLINE void energy_grad_k(double F1_1,
                    double F1_2,
                    double F1_3,
                    double F2_1,
@@ -1611,7 +1611,7 @@ MUDA_GENERIC MUDA_INLINE void energy_grad_k(double F1_1,
 }
 
 
-MUDA_GENERIC MUDA_INLINE void energy_Hess_k(double F1_1,
+CT_GENERIC CT_INLINE void energy_Hess_k(double F1_1,
                    double F1_2,
                    double F1_3,
                    double F2_1,
