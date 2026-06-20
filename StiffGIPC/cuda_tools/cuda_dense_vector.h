@@ -171,7 +171,7 @@ class DenseVectorView
 
     void fill(const T& value)
     {
-        cudaMemcpy(m_data, &value, sizeof(T), cudaMemcpyHostToDevice);  // only valid for size==1
+        buffer_view().fill(value);
     }
 
     void copy_from(const CBufferView<T>& other)

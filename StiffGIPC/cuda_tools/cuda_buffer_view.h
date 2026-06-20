@@ -377,6 +377,8 @@ class DeviceBuffer
         cudaMemcpy(m_data, view.data(), m_size * sizeof(T), cudaMemcpyDeviceToDevice);
     }
 
+    void fill(const T& value) { view().fill(value); }
+
     Dense1D<T> viewer() CT_NOEXCEPT { return Dense1D<T>(m_data, m_size); }
     CDense1D<T> cviewer() const CT_NOEXCEPT { return CDense1D<T>(m_data, m_size); }
 

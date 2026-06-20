@@ -95,7 +95,6 @@ EXTERNAL CREDITS
 This work utilizes the following external software library, which have been included here for convenience:
 Copyrights are retained by the original authors.
 
-- **muda**: https://github.com/KemengHuang/muda (fork of https://github.com/MuGdxy/muda)
 - **METIS**: https://github.com/KemengHuang/METIS (fork of https://github.com/KarypisLab/METIS)  
 - **GKlib**: https://github.com/KemengHuang/GKlib (fork of https://github.com/KarypisLab/GKlib)
 

@@ -79,7 +79,7 @@ void DiagPreconditioner::assemble(GIPCTripletMatrix& global_triplets)
     gipc::Timer timer{"precomputing Preconditioner"};
     auto        cols = global_triplets.block_cols();
     m_diag3x3.resize(cols);
-    //m_diag3x3.view().fill(gipc::Matrix3x3::Identity());
+    m_diag3x3.view().fill(gipc::Matrix3x3::Identity());
     details::diag_assemble(m_diag3x3.view(), global_triplets);
 }
 
