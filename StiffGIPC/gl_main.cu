@@ -45,11 +45,10 @@ lbvh_e           bvh_e;
 GIPC             ipc;
 device_TetraData d_tetMesh;
 tetrahedra_obj   tetMesh;
-vector<Node>     nodes;
-vector<AABB>     bvs;
-vector<string>   obj_pathes;
+std::vector<Node>     nodes;
+std::vector<AABB>     bvs;
+std::vector<std::string>   obj_pathes;
 int              initPath = 0;
-using namespace std;
 int   step      = 0;
 int   frameId   = 0;
 int   surfNumId = 0;
@@ -93,9 +92,9 @@ GLuint shaderProgram;
 int            clothFaceOffset = 0;
 int            bodyVertOffset  = 0;
 double         global_offset   = 1.0;
-vector<string> files;
-vector<int>    file_vert_offsets;
-vector<int>    file_tet_offsets;
+std::vector<std::string> files;
+std::vector<int>    file_vert_offsets;
+std::vector<int>    file_tet_offsets;
 
 void Init_CUDA()
 {
@@ -191,7 +190,7 @@ void SaveScreenShot(int width, int height, const std::string& file_name)
     free(screen_data);
 }
 
-void saveSurfaceMesh(const string& path)
+void saveSurfaceMesh(const std::string& path)
 {
     std::stringstream ss;
     ss << path;
@@ -201,14 +200,14 @@ void saveSurfaceMesh(const string& path)
     //if (surfNumId % 10 != 0) return;
     ss << ".obj";
     std::string file_path = ss.str();
-    ofstream    outSurf(file_path);
+    std::ofstream    outSurf(file_path);
 
-    map<int, int> meshToSurf;
-    outSurf << "s 1" << endl;
+    std::map<int, int> meshToSurf;
+    outSurf << "s 1" << std::endl;
     for(int i = 0; i < tetMesh.surfVerts.size(); i++)
     {
         const auto& pos = tetMesh.vertexes[tetMesh.surfVerts[i]];
-        outSurf << "v " << pos.x << " " << pos.y << " " << pos.z << endl;
+        outSurf << "v " << pos.x << " " << pos.y << " " << pos.z << std::endl;
         meshToSurf[tetMesh.surfVerts[i]] = i;
     }
 
@@ -216,13 +215,13 @@ void saveSurfaceMesh(const string& path)
     {
         const auto& tri = tetMesh.surface[i];
         outSurf << "f " << meshToSurf[tri.x] + 1 << " " << meshToSurf[tri.y] + 1
-                << " " << meshToSurf[tri.z] + 1 << endl;
+                << " " << meshToSurf[tri.z] + 1 << std::endl;
     }
     outSurf.close();
 }
 
 
-void saveTets(const string& path)
+void saveTets(const std::string& path)
 {
     int tetIdoffset = 0;
     for(int ii = 0; ii < 4096; ii++)
@@ -234,20 +233,20 @@ void saveTets(const string& path)
         //if (surfNumId % 10 != 0) return;
         ss << ".msh";
         std::string file_path = ss.str();
-        ofstream    outmsh1(file_path);
+        std::ofstream    outmsh1(file_path);
 
-        map<int, int> meshToSurf;
-        //outSurf << "s 1" << endl;
+        std::map<int, int> meshToSurf;
+        //outSurf << "s 1" << std::endl;
         outmsh1 << "$Nodes\n";
-        outmsh1 << file_vert_offsets[ii + 1] - file_vert_offsets[ii] << endl;
+        outmsh1 << file_vert_offsets[ii + 1] - file_vert_offsets[ii] << std::endl;
         for(int i = 0; i < file_vert_offsets[ii + 1] - file_vert_offsets[ii]; i++)
         {
             const auto& pos = tetMesh.vertexes[i + file_vert_offsets[ii]];
-            outmsh1 << i + 1 << " " << pos.x << " " << pos.y << " " << pos.z << endl;
+            outmsh1 << i + 1 << " " << pos.x << " " << pos.y << " " << pos.z << std::endl;
             meshToSurf[i + file_vert_offsets[ii]] = i;
         }
         outmsh1 << "$Elements\n";
-        outmsh1 << file_tet_offsets[ii + 1] << endl;
+        outmsh1 << file_tet_offsets[ii + 1] << std::endl;
 
         for(int i = 0; i < file_tet_offsets[ii + 1]; i++)
         {
@@ -255,7 +254,7 @@ void saveTets(const string& path)
             outmsh1 << i + 1 << " 4 0 " << meshToSurf[tetMesh.tetrahedras[tetId].x] + 1
                     << " " << meshToSurf[tetMesh.tetrahedras[tetId].y] + 1
                     << " " << meshToSurf[tetMesh.tetrahedras[tetId].z] + 1 << " "
-                    << meshToSurf[tetMesh.tetrahedras[tetId].w] + 1 << endl;
+                    << meshToSurf[tetMesh.tetrahedras[tetId].w] + 1 << std::endl;
         }
         tetIdoffset += file_tet_offsets[ii + 1];
         outmsh1.close();
@@ -375,7 +374,7 @@ void draw_mesh3D()
     glEnable(GL_DEPTH_TEST);
     glLineWidth(1.5f);
     glColor3f(0.9f, 0.1f, 0.1f);
-    const vector<uint3>& surf = tetMesh.surface;  //obj.faces;
+    const std::vector<uint3>& surf = tetMesh.surface;  //obj.faces;
     glBegin(GL_TRIANGLES);
 
 
@@ -451,12 +450,12 @@ void draw_bvh()
 }
 
 int            counttt = 0;
-vector<float3> getRenderGeometry(int& number)
+std::vector<float3> getRenderGeometry(int& number)
 {
 
-    vector<double3> meshNormal(tetMesh.vertexNum, make_double3(0, 0, 0));
+    std::vector<double3> meshNormal(tetMesh.vertexNum, make_double3(0, 0, 0));
     number = tetMesh.surface.size();  //meshTemp.surfaceRender.size();
-    vector<float3> pos_normal_color(3 * number * 3);
+    std::vector<float3> pos_normal_color(3 * number * 3);
 
     for(int i = 0; i < number; i++)
     {
@@ -542,7 +541,7 @@ int    total_cg_iterations     = 0;
 int    total_newton_iterations = 0;
 int    start                   = -1;
 
-void saveScreenPic(const string& path)
+void saveScreenPic(const std::string& path)
 {
     std::stringstream ss;
     ss << path;
@@ -682,7 +681,7 @@ void LoadSettings()
     std::ifstream infile;
 
 
-    string DEFAULT_CONFIG_FILE = std::string{gipc::assets_dir()} + "scene/parameterSetting.txt";
+    std::string DEFAULT_CONFIG_FILE = std::string{gipc::assets_dir()} + "scene/parameterSetting.txt";
 
 
     infile.open(DEFAULT_CONFIG_FILE, std::ifstream::in);
@@ -811,8 +810,8 @@ void set_case2()
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
 
     linear_system_buff_scale = 1.0;
-    double Youngth_Modulus = 1e7;
-    string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
+    double Youngth_Modulus = 1e4;
+    std::string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
                            3,
                            gipc::BodyType::ABD,
@@ -827,7 +826,7 @@ void set_case2()
     transform.block<3, 1>(0, 3) =
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
 
-    string mesh1_path = mesh0_path;
+    std::string mesh1_path = mesh0_path;
     importer.load_geometry(tetMesh,
                            3,
                            gipc::BodyType::FEM,
@@ -842,7 +841,7 @@ void set_case2()
     transform.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 1.0;
     transform.block<3, 1>(0, 3) =
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
-    string mesh2_path = assets_dir + "triMesh/cloth_high.obj";
+    std::string mesh2_path = assets_dir + "triMesh/cloth_high.obj";
 
     importer.load_geometry(tetMesh,
                            2,
@@ -878,7 +877,7 @@ void set_case4()
     t.rotate(Eigen::AngleAxisd(3.1415926 / 2, Eigen::Vector3d::UnitX()));
     Eigen::Matrix4d transform = t.matrix();
 
-    string mesh_path = assets_dir + "triMesh/cloth_high.obj";
+    std::string mesh_path = assets_dir + "triMesh/cloth_high.obj";
     importer.load_geometry(tetMesh,
                            2,
                            gipc::BodyType::FEM,
@@ -918,7 +917,7 @@ void set_case5()
     t.scale(scale);
     Eigen::Matrix4d transform = t.matrix();
 
-    string mesh_path       = assets_dir + "tetMesh/high_mat.msh";
+    std::string mesh_path       = assets_dir + "tetMesh/high_mat.msh";
     double Youngth_Modulus = 1e4;
     ipc.PoissonRate        = 0.48;
     importer.load_geometry(tetMesh,
@@ -1042,7 +1041,7 @@ void set_case6()
     Transform t     = Transform::Identity();
     t.scale(1.5);
     t.translate(Eigen::Vector3d(0, 0.35, 0));
-    string mesh_path = assets_dir + "triMesh/cloth_high.obj";
+    std::string mesh_path = assets_dir + "triMesh/cloth_high.obj";
     importer.load_geometry(tetMesh,
                            2,
                            gipc::BodyType::FEM,
@@ -1098,7 +1097,7 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 3;
+    int scene_no = 1;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1439,7 +1438,7 @@ void initScene()
 }
 
 
-void outputAnimationMeshInfo(string pathCloth, string pathBody)
+void outputAnimationMeshInfo(std::string pathCloth, std::string pathBody)
 {
     std::stringstream ss;
     ss << pathCloth;
@@ -1449,20 +1448,20 @@ void outputAnimationMeshInfo(string pathCloth, string pathBody)
     //if (surfNumId % 10 != 0) return;
     ss << ".obj";
     std::string file_path = ss.str();
-    ofstream    outSurf(file_path);
+    std::ofstream    outSurf(file_path);
 
-    map<int, int> meshToSurf;
+    std::map<int, int> meshToSurf;
     for(int i = 0; i < bodyVertOffset; i++)
     {
         const auto& pos = tetMesh.vertexes[i];
-        outSurf << "v " << pos.x << " " << pos.y << " " << pos.z << endl;
+        outSurf << "v " << pos.x << " " << pos.y << " " << pos.z << std::endl;
         //meshToSurf[tetMesh.surfVerts[i]] = i;
     }
 
     for(int i = 0; i < tetMesh.triangles.size(); i++)
     {
         const auto& tri = tetMesh.triangles[i];
-        outSurf << "f " << tri.x + 1 << " " << tri.y + 1 << " " << tri.z + 1 << endl;
+        outSurf << "f " << tri.x + 1 << " " << tri.y + 1 << " " << tri.z + 1 << std::endl;
     }
     outSurf.close();
 
@@ -1474,13 +1473,13 @@ void outputAnimationMeshInfo(string pathCloth, string pathBody)
     //if (surfNumId % 10 != 0) return;
     ss2 << ".obj";
     std::string file_path2 = ss2.str();
-    ofstream    outSurf2(file_path2);
+    std::ofstream    outSurf2(file_path2);
 
-    //map<int, int> meshToSurf;
+    //std::map<int, int> meshToSurf;
     for(int i = bodyVertOffset; i < tetMesh.vertexes.size(); i++)
     {
         const auto& pos = tetMesh.vertexes[i];
-        outSurf2 << "v " << pos.x << " " << pos.y << " " << pos.z << endl;
+        outSurf2 << "v " << pos.x << " " << pos.y << " " << pos.z << std::endl;
         //meshToSurf[tetMesh.surfVerts[i]] = i;
     }
 
@@ -1488,7 +1487,7 @@ void outputAnimationMeshInfo(string pathCloth, string pathBody)
     {
         const auto& tri = tetMesh.surface[i];
         outSurf2 << "f " << tri.x + 1 - bodyVertOffset << " " << tri.y + 1 - bodyVertOffset
-                 << " " << tri.z + 1 - bodyVertOffset << endl;
+                 << " " << tri.z + 1 - bodyVertOffset << std::endl;
     }
     outSurf2.close();
     surfNumId++;
@@ -1503,8 +1502,8 @@ void display(void)
 
     std::filesystem::exists(output_path) || std::filesystem::create_directory(output_path);
 
-    if(stop)
-        return;
+    //if(stop)
+    //    return;
 
 
     ipc.IPC_Solver(d_tetMesh);

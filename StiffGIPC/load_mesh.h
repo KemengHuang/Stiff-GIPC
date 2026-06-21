@@ -21,16 +21,15 @@
 #include <Eigen/Core>
 #include <body_boundary_type.h>
 
-using namespace std;
 
 class mesh_obj
 {
   public:
-    vector<double3> vertexes;
-    vector<double3> normals;
-    vector<uint3>   facenormals;
-    vector<uint3>   faces;
-    vector<uint2>   edges;
+    std::vector<double3> vertexes;
+    std::vector<double3> normals;
+    std::vector<uint3>   facenormals;
+    std::vector<uint3>   faces;
+    std::vector<uint2>   edges;
     int             vertexNum;
     int             faceNum;
     int             edgeNum;
@@ -42,57 +41,57 @@ class tetrahedra_obj
 {
   public:
     double         maxVolum = 0.0f;
-    vector<bool>   isNBC;
-    vector<bool>   isCollide;
-    vector<double> volum;
-    vector<double> area;
-    vector<double> masses;
-    vector<int>                    apply_gravity;
+    std::vector<bool>   isNBC;
+    std::vector<bool>   isCollide;
+    std::vector<double> volum;
+    std::vector<double> area;
+    std::vector<double> masses;
+    std::vector<int>                    apply_gravity;
     double                         meanMass  = 0.0f;
     double                         meanVolum = 0.0f;
-    vector<double3>                vertexes;
-    vector<uint32_t>               partId;
-    vector<vector<uint32_t>>       part_block;
-    vector<int>                    partId_map_real;
-    vector<int>                    real_map_partId;
+    std::vector<double3>                vertexes;
+    std::vector<uint32_t>               partId;
+    std::vector<std::vector<uint32_t>>       part_block;
+    std::vector<int>                    partId_map_real;
+    std::vector<int>                    real_map_partId;
     uint32_t                       part_offset = 0;
-    vector<int>                    boundaryTypies;
-    vector<uint4>                  tetrahedras;
-    vector<uint3>                  triangles;
-    vector<uint32_t>               targetIndex;
-    vector<double3>                forces;
-    vector<double3>                velocities;
-    vector<double3>                d_velocities;
-    vector<__GEIGEN__::Matrix3x3d> DM_inverse;
-    vector<__GEIGEN__::Matrix2x2d> tri_DM_inverse;
-    vector<__GEIGEN__::Matrix3x3d> constraints;
+    std::vector<int>                    boundaryTypies;
+    std::vector<uint4>                  tetrahedras;
+    std::vector<uint3>                  triangles;
+    std::vector<uint32_t>               targetIndex;
+    std::vector<double3>                forces;
+    std::vector<double3>                velocities;
+    std::vector<double3>                d_velocities;
+    std::vector<__GEIGEN__::Matrix3x3d> DM_inverse;
+    std::vector<__GEIGEN__::Matrix2x2d> tri_DM_inverse;
+    std::vector<__GEIGEN__::Matrix3x3d> constraints;
 
-    vector<double3>    targetPos;
-    vector<double3>    tetra_fiberDir;
-    vector<double>     vert_youngth_modules;
-    vector<double>     lengthRate;
-    vector<double>     volumeRate;
+    std::vector<double3>    targetPos;
+    std::vector<double3>    tetra_fiberDir;
+    std::vector<double>     vert_youngth_modules;
+    std::vector<double>     lengthRate;
+    std::vector<double>     volumeRate;
     std::vector<uint2> tri_edges_adj_points;
     std::vector<uint2> tri_edges;
 
 
-    vector<uint32_t> surfId2TetId;
-    vector<uint3>    surface;
+    std::vector<uint32_t> surfId2TetId;
+    std::vector<uint3>    surface;
 
-    vector<uint32_t> surfVerts;
-    vector<uint2>    surfEdges;
+    std::vector<uint32_t> surfVerts;
+    std::vector<uint2>    surfEdges;
 
-    vector<double3> xTilta;
-    vector<double3> dx_Elastic;
-    vector<double3> acceleration;
-    vector<double3> rest_V;
-    vector<double3> V_prev;
+    std::vector<double3> xTilta;
+    std::vector<double3> dx_Elastic;
+    std::vector<double3> acceleration;
+    std::vector<double3> rest_V;
+    std::vector<double3> V_prev;
 
 
-    vector<vector<unsigned int>> vertNeighbors;
-    vector<unsigned int>         neighborList;
-    vector<unsigned int>         neighborStart;
-    vector<unsigned int>         neighborNum;
+    std::vector<std::vector<unsigned int>> vertNeighbors;
+    std::vector<unsigned int>         neighborList;
+    std::vector<unsigned int>         neighborStart;
+    std::vector<unsigned int>         neighborNum;
 
     int D12x12Num        = 0;
     int D9x9Num          = 0;
@@ -157,8 +156,8 @@ class tetrahedra_obj
     bool output_tetrahedraMesh(const std::string& filename);
 
     bool output_tetrahedraMesh_reorder(const std::string&      filename,
-                                       const vector<uint32_t>& new_order,
-                                       const vector<uint32_t>& order_map);
+                                       const std::vector<uint32_t>& new_order,
+                                       const std::vector<uint32_t>& order_map);
 
   private:
     bool abd_load_phase         = true;

@@ -19,9 +19,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # find packages
 enable_language(CUDA)
-# Keep only the Windows define; host options (/GR /EHsc) are added below via
-# target_compile_options to avoid CMake merging them into a preprocessor define.
-set(CMAKE_CUDA_FLAGS "-D_WINDOWS")
+
+# Platform detection: MSVC vs GNU/Clang
+if(MSVC)
+    # Keep only the Windows define; host options (/GR /EHsc) are added below via
+    # target_compile_options to avoid CMake merging them into a preprocessor define.
+    set(CMAKE_CUDA_FLAGS "-D_WINDOWS")
+else()
+    set(CMAKE_CUDA_FLAGS "")
+endif()
 find_package(Eigen3 REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
@@ -77,9 +83,11 @@ target_link_libraries(gipc PRIVATE metis_partition CUDA::cudart)
 target_link_libraries(gipc PRIVATE GLUT::GLUT GLEW::GLEW OpenGL::GLU Eigen3::Eigen)
 target_link_libraries(gipc PRIVATE nlohmann_json::nlohmann_json)
 
-# Some external C dependencies still pull in the static CRT; gipc uses the
-# dynamic CRT, so drop the static one to avoid LNK4098 conflicts.
-target_link_options(gipc PRIVATE "/NODEFAULTLIB:LIBCMT")
+if(MSVC)
+    # Some external C dependencies still pull in the static CRT; gipc uses the
+    # dynamic CRT, so drop the static one to avoid LNK4098 conflicts.
+    target_link_options(gipc PRIVATE "/NODEFAULTLIB:LIBCMT")
+endif()
 
 target_compile_features(gipc PRIVATE cxx_std_17)
 
@@ -91,21 +99,22 @@ set_target_properties(gipc PROPERTIES
     CUDA_ARCHITECTURES native)
 
 target_compile_options(gipc
-    PRIVATE $<$<COMPILE_LANGUAGE:CUDA>: 
-        ${CMAKE_CUDA_FLAGS} 
-        --use_fast_math 
-        -lineinfo 
-        --ptxas-options=-allow-expensive-optimizations=true 
-        -Xcudafe 
+    PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+        ${CMAKE_CUDA_FLAGS}
+        --use_fast_math
+        -lineinfo
+        --ptxas-options=-allow-expensive-optimizations=true
+        -Xcudafe
         "--display_error_number --diag_suppress=implicit_return_from_non_void_function --diag_suppress=2642"
     >
-    PUBLIC $<$<COMPILE_LANGUAGE:CUDA>: 
-        --extended-lambda 
-        --expt-relaxed-constexpr 
+    PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:
+        --extended-lambda
+        --expt-relaxed-constexpr
         --default-stream=per-thread
-        -Xcompiler=/GR
-        -Xcompiler=/EHsc
-        -Xcompiler=/Zc:preprocessor
+        $<$<CXX_COMPILER_ID:MSVC>:-Xcompiler=/GR>
+        $<$<CXX_COMPILER_ID:MSVC>:-Xcompiler=/EHsc>
+        $<$<CXX_COMPILER_ID:MSVC>:-Xcompiler=/Zc:preprocessor>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Xcompiler=-fPIC>
     >
 )
 
@@ -114,9 +123,11 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${GIPC_SOURCE} ${GIPC_HANDER
 add_subdirectory("MeshProcess")
 
 # Ensure external C libraries use the same dynamic runtime as the executable
-# to avoid LIBCMT/MSVCRT conflicts.
-foreach(_tgt GKlib metis metis_partition)
-    if(TARGET ${_tgt})
-        set_property(TARGET ${_tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-    endif()
-endforeach()
+# to avoid LIBCMT/MSVCRT conflicts (MSVC only).
+if(MSVC)
+    foreach(_tgt GKlib metis metis_partition)
+        if(TARGET ${_tgt})
+            set_property(TARGET ${_tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+        endif()
+    endforeach()
+endif()
