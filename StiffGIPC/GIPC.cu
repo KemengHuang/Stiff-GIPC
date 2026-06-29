@@ -6586,7 +6586,7 @@ __global__ void _checkGroundCloseVal(const double3* vertexes,
     double  dist  = __GEIGEN__::__v_vec_dot(normal, vertexes[gidx]) - *g_offset;
     double  dist2 = dist * dist;
 
-    if(dist2 < _closeConstraintVal[gidx])
+    if(dist2 < _closeConstraintVal[idx])
     {
         *_isChange = 1;
     }

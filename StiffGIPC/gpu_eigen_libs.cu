@@ -1286,12 +1286,12 @@ __device__ __host__ void __Inverse(const Matrix3x3d& input, Matrix3x3d& result)
 
     for(int i = 0; i < dim; i++)
     {
-        if(abs(mat[i][i]) < eps)
+        if(__mabs(mat[i][i]) < eps)
         {
             int j;
             for(j = i + 1; j < dim; j++)
             {
-                if(abs(mat[j][i]) > eps)
+                if(__mabs(mat[j][i]) > eps)
                     break;
             }
             if(j == dim)
@@ -1361,12 +1361,12 @@ __device__ __host__ void __Inverse2x2(const Matrix2x2d& input, Matrix2x2d& resul
 
     for(int i = 0; i < dim; i++)
     {
-        if(abs(mat[i][i]) < eps)
+        if(__mabs(mat[i][i]) < eps)
         {
             int j;
             for(j = i + 1; j < dim; j++)
             {
-                if(abs(mat[j][i]) > eps)
+                if(__mabs(mat[j][i]) > eps)
                     break;
             }
             if(j == dim)
@@ -1629,14 +1629,14 @@ __device__ __host__ void __SolverForCubicEquation(const double& a,
     double C      = c * c - 3 * b * d;
     double delta  = B * B - 4 * A * C;
     num_solutions = 0;
-    if(abs(A) < EPS * EPS && abs(B) < EPS * EPS)
+    if(__mabs(A) < EPS * EPS && __mabs(B) < EPS * EPS)
     {
         results[0]    = -b / 3.0 / a;
         results[1]    = results[0];
         results[2]    = results[0];
         num_solutions = 3;
     }
-    else if(abs(delta) <= EPS * EPS)
+    else if(__mabs(delta) <= EPS * EPS)
     {
         double K      = B / A;
         results[0]    = -b / a + K;
