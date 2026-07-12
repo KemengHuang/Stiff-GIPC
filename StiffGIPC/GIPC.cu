@@ -471,7 +471,7 @@ __global__ void _reduct_max_double3_to_double(const double3* _double3Dim, double
     double3 tempMove = _double3Dim[idx];
 
     double temp =
-        std::max(std::max(abs(tempMove.x), abs(tempMove.y)), abs(tempMove.z));
+        std::fmax(std::fmax(std::fabs(tempMove.x), std::fabs(tempMove.y)), std::fabs(tempMove.z));
 
     int    warpTid = threadIdx.x % 32;
     int    warpId  = (threadIdx.x >> 5);
@@ -1177,11 +1177,11 @@ __device__ double _computeInjectiveStepSize_3d(const double3*  verts,
 
 
     //printf("a b c d:   %f  %f  %f  %f     %f     %f,    id0, id1, id2, id3:  %d  %d  %d  %d\n", a, b, c, d, ratio, errorRate, v0, v1, v2, v3);
-    if(abs(a) <= errorRate /** errorRate*/)
+    if(std::fabs(a) <= errorRate /** errorRate*/)
     {
-        if(abs(b) <= errorRate /** errorRate*/)
+        if(std::fabs(b) <= errorRate /** errorRate*/)
         {
-            if(false && abs(c) <= errorRate)
+            if(false && std::fabs(c) <= errorRate)
             {
                 t = 1;
             }

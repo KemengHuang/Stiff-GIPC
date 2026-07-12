@@ -100,7 +100,7 @@ namespace math
     {
         T d  = (T)0.5 * (a1 - a2);
         T bs = b1 * b1;
-        T mu = a2 - std::copysign(bs / (std::abs(d) + std::sqrt(d * d + bs)), d);
+        T mu = a2 - std::copysign(bs / (std::fabs(d) + std::sqrt(d * d + bs)), d);
         return mu;
     }
 
@@ -121,7 +121,7 @@ namespace math
         /// t == 0
         if constexpr(t == 0)
         {
-            if(std::abs(sigma(1)) >= std::abs(sigma(2)))
+            if(std::fabs(sigma(1)) >= std::fabs(sigma(2)))
             {
                 if(sigma(1) < 0)
                 {
@@ -156,7 +156,7 @@ namespace math
         /// t == 1
         else if constexpr(t == 1)
         {
-            if(std::abs(sigma(0)) >= sigma(1))
+            if(std::fabs(sigma(0)) >= std::fabs(sigma(1)))
             {
                 if(sigma(0) < 0)
                 {
@@ -170,7 +170,7 @@ namespace math
             U.col(0).swap(U.col(1));
             V.col(0).swap(V.col(1));
 
-            if(std::abs(sigma(1)) < std::abs(sigma(2)))
+            if(std::fabs(sigma(1)) < std::fabs(sigma(2)))
             {
                 swap(sigma(1), sigma(2));
                 U.col(1).swap(U.col(2));
@@ -242,8 +242,8 @@ namespace math
                                            + beta[0] * beta[0] + beta[1] * beta[1]),
                            (T)1);
 
-        while(abd(alpha[0]) > tol && abs(alpha[1]) > tol && abs(alpha[2]) > tol
-              && abs(beta[0]) > tol && abs(beta[1]) > tol)
+        while(std::fabs(alpha[0]) > tol && std::fabs(alpha[1]) > tol && std::fabs(alpha[2]) > tol
+              && std::fabs(beta[0]) > tol && std::fabs(beta[1]) > tol)
         {
             auto mu = wilkinson_shift(alpha[1] * alpha[1] + beta[0] * beta[0],
                                       gamma[1],
@@ -263,17 +263,17 @@ namespace math
             gamma[1] = alpha[1] * beta[1];
         }
 
-        if(std::abs(beta[1]) <= tol)
+        if(std::fabs(beta[1]) <= tol)
         {
             process<0>(B, U, S, V);
             sort_sigma<0>(U, S, V);
         }
-        else if(std::abs(beta[0]) <= tol)
+        else if(std::fabs(beta[0]) <= tol)
         {
             process<1>(B, U, S, V);
             sort_sigma<1>(U, S, V);
         }
-        else if(std::abs(alpha[1]) <= tol)
+        else if(std::fabs(alpha[1]) <= tol)
         {
             GivensRotation<T> r1(1, 2);
             r1.computeUnconventional(B(1, 2), B(2, 2));
@@ -282,7 +282,7 @@ namespace math
             process<0>(B, U, S, V);
             sort_sigma<0>(U, S, V);
         }
-        else if(std::abs(alpha[2]) <= tol)
+        else if(std::fabs(alpha[2]) <= tol)
         {
             GivensRotation<T> r1(1, 2);
             r1.computeConventional(B(1, 1), B(1, 2));
@@ -297,7 +297,7 @@ namespace math
             process<0>(B, U, S, V);
             sort_sigma<0>(U, S, V);
         }
-        else if(std::abs(alpha[0]) <= tol)
+        else if(std::fabs(alpha[0]) <= tol)
         {
             GivensRotation<T> r1(0, 1);
             r1.computeUnconventional(B(0, 1), B(1, 1));

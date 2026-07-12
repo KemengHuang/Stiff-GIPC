@@ -150,7 +150,7 @@ bool WriteBitmapFile(int width, int height, const std::string& file_name, unsign
     bitmapInfoHeader.biPlanes      = 1;
     bitmapInfoHeader.biBitCount    = 24;
     bitmapInfoHeader.biCompression = 0L;
-    bitmapInfoHeader.biSizeImage   = width * abs(height) * 3;
+    bitmapInfoHeader.biSizeImage   = width * std::abs(height) * 3;
 
     //////////////////////////////////////////////////////////////////////////
     FILE*         filePtr;
