@@ -298,7 +298,7 @@ bool tetrahedra_obj::load_triMesh(const std::string&     filename,
 
     triangleNum = triangles.size();
     set_body_tri_num(gipc::BodyType::FEM, elementNumber);
-    vertexOffset += vertexNum;
+    vertexOffset = vertexNum;
     set_body_point_num(gipc::BodyType::FEM, nodeNumber);
 
     softNum   = targetIndex.size();
