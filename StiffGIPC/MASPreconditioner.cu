@@ -2356,6 +2356,7 @@ void MASPreconditioner::FreeMAS()
 {
     CUDA_SAFE_CALL(cudaFree(d_denseLevel));
     CUDA_SAFE_CALL(cudaFree(d_coarseSpaceTables));
+    CUDA_SAFE_CALL(cudaFree(d_coarseTable));
     CUDA_SAFE_CALL(cudaFree(d_levelSize));
     CUDA_SAFE_CALL(cudaFree(d_goingNext));
     CUDA_SAFE_CALL(cudaFree(d_prefixOriginal));
