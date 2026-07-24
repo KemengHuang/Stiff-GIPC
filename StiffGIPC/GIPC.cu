@@ -10886,6 +10886,8 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
 
     CUDA_SAFE_CALL(cudaMemset(_moveDir, 0, vertexNum * sizeof(double3)));
     double totalTimeStep = 0;
+    double beta          = 1;
+    int    Kmin          = 6;
     for(; k < iterCap; ++k)
     {
         stats_at_current_frame["newton"].push_back(gipc::Json::object());
@@ -11005,6 +11007,18 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
         (cudaEventDestroy(end3));
         (cudaEventDestroy(end4));
         totalTimeStep += alpha;
+        if(k + 1 >= Kmin)
+        {
+            beta = (1 - alpha) * beta;
+        }
+        else
+        {
+            beta = beta;
+        }
+        if(beta <= Newton_solver_threshold)
+        {
+            break;
+        }
     }
     //iterV.push_back(k);
     //std::ofstream outiter("iterCount.txt");

@@ -80,15 +80,19 @@ void SimpleSceneImporter::load_geometry(tetrahedra_obj&  tetras,
     }
     else if(Dimensions == 2)
     {
+        int btype_id = 0;
+        if(body_boundary_type == BodyBoundaryType::Fixed)
+            btype_id = 1;
         if(preconditionerType)
         {
+
             auto paths = metis_sort(meth_path, Dimensions);
-            tetras.load_triMesh(paths[0], transform, 0);
+            tetras.load_triMesh(paths[0], transform, btype_id);
             tetras.load_parts(paths[1]);
         }
         else
         {
-            tetras.load_triMesh(meth_path, transform, 0);
+            tetras.load_triMesh(meth_path, transform, btype_id);
         }
     }
 }
