@@ -8,48 +8,44 @@
 
 #include "GL/glew.h"
 #include "GL/freeglut.h"
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <cuda_runtime.h>
 #include <map>
-// #include "GIPC.cuh"
 #include "device_launch_parameters.h"
-#include "mlbvh.cuh"
+#include <collision/mlbvh.cuh>
 #include <stdio.h>
-#include "load_mesh.h"
+#include <io/load_mesh.h>
 #include "cuda_tools/cuda_tools.h"
 #include <queue>
-//#include "timer.h"
-#include "femEnergy.cuh"
-#include "gpu_eigen_libs.cuh"
-#include "fem_parameters.h"
-#include "gipc_path.h"
+#include <fem/femEnergy.cuh>
+#include <math/gpu_eigen_libs.cuh>
+#include <fem/fem_parameters.h>
+#include <core/gipc_path.h>
 #include <gipc/type_define.h>
 #include <filesystem>
 #include <gipc/statistics.h>
 #include <gipc/utils/simple_scene_importer.h>
 #include <Eigen/Geometry>
-#include <thrust/sort.h>
-#include <thrust/sequence.h>
-#include <thrust/device_ptr.h>
-#include <GIPC.cuh>
+#include <core/GIPC.cuh>
+#include <cstdlib>
 
-auto             assets_dir = std::string{gipc::assets_dir()};
-std::string      metis_dir  = assets_dir + "sorted_mesh/";
-double           collision_detection_buff_scale = 1;
-double           motion_rate                    = 1;
-double           linear_system_buff_scale       = 1.0;
-mesh_obj         obj;
-lbvh_f           bvh_f;
-lbvh_e           bvh_e;
-GIPC             ipc;
-device_TetraData d_tetMesh;
-tetrahedra_obj   tetMesh;
-std::vector<Node>     nodes;
-std::vector<AABB>     bvs;
-std::vector<std::string>   obj_pathes;
-int              initPath = 0;
-int   step      = 0;
+auto        assets_dir = std::string{gipc::assets_dir()};
+std::string metis_dir  = assets_dir + "sorted_mesh/";
+double legacy_collision_buffer_scale = 1;  // parsed for file compatibility; unused
+double                   motion_rate = 1;
+mesh_obj                 obj;
+lbvh_f                   bvh_f;
+lbvh_e                   bvh_e;
+GIPC                     ipc;
+device_TetraData         d_tetMesh;
+tetrahedra_obj           tetMesh;
+std::vector<Node>        nodes;
+std::vector<AABB>        bvs;
+std::vector<std::string> obj_pathes;
+int                      initPath  = 0;
+int                      step      = 0;
 int   frameId   = 0;
 int   surfNumId = 0;
 float xRot      = 0.0f;
@@ -681,7 +677,8 @@ void LoadSettings()
     std::ifstream infile;
 
 
-    std::string DEFAULT_CONFIG_FILE = std::string{gipc::assets_dir()} + "scene/parameterSetting.txt";
+    std::string DEFAULT_CONFIG_FILE =
+        std::string{gipc::assets_dir()} + "scene/parameterSetting.txt";
 
 
     infile.open(DEFAULT_CONFIG_FILE, std::ifstream::in);
@@ -703,14 +700,13 @@ void LoadSettings()
         infile >> ignoreToken >> ipc.strainRate;
         infile >> ignoreToken >> ipc.softMotionRate;
         //infile >> ignoreToken >> ipc.bendStiff;
-        infile >> ignoreToken >> collision_detection_buff_scale;
+        infile >> ignoreToken >> legacy_collision_buffer_scale;
         infile >> ignoreToken >> motion_rate;
         infile >> ignoreToken >> ipc.IPC_dt;
         infile >> ignoreToken >> ipc.pcg_threshold;
         infile >> ignoreToken >> ipc.Newton_solver_threshold;
         infile >> ignoreToken >> ipc.relative_dhat;
         //infile >> ignoreToken >> meshids;
-
 
 
         //ipc.shearStiff =
@@ -733,7 +729,6 @@ void set_case1()
     double                    abd_height = -0.6;
     gipc::SimpleSceneImporter importer;
 
-    linear_system_buff_scale = 1.0;
 
     double Youngth_Modulus = 1e4;
     for(int k = 0; k < count_Y; ++k)
@@ -809,7 +804,6 @@ void set_case2()
     transform.block<3, 1>(0, 3) =
         -Eigen::Vector3d(position_offset.x, position_offset.y, position_offset.z);
 
-    linear_system_buff_scale = 1.0;
     double Youngth_Modulus = 1e4;
     std::string mesh0_path      = assets_dir + "tetMesh/bunny2.msh";
     importer.load_geometry(tetMesh,
@@ -858,14 +852,12 @@ void set_case3()
     gipc::SimpleSceneImporter importer{assets_dir + "scene/json/wrecking-ball-simple.json",
                                        assets_dir + "tetMesh/wrecking-ball-mesh/",
                                        gipc::BodyType::ABD};
-    linear_system_buff_scale = 1.0;
     importer.import_scene(tetMesh);
 }
 
 void set_case4()
 {
     ipc.pcg_data.P_type = 0;
-    linear_system_buff_scale = 1.0;
     gipc::SimpleSceneImporter importer;
     double                    scale           = 0.6;
     double3                   position_offset = make_double3(0, 1.0, 0);
@@ -906,7 +898,6 @@ void set_case4()
 void set_case5()
 {
     ipc.pcg_data.P_type = 1;
-    linear_system_buff_scale = 2.0;
     gipc::SimpleSceneImporter importer;
     double                    scale = 1.0;
     Eigen::Vector3d           position_offset{0, 0, 0};
@@ -976,7 +967,6 @@ void set_case5()
 
 void set_case6()
 {
-    linear_system_buff_scale = 2.0;
     ipc.pcg_data.P_type = 1;
     double scale      = 0.3;
     double dist       = scale / 2;
@@ -1097,7 +1087,18 @@ void initScene()
     std::filesystem::exists(metis_dir) || std::filesystem::create_directory(metis_dir);
     ipc.pcg_data.P_type = 1;
 
-    int scene_no = 1;
+    int scene_no = 5;
+    if(const char* value = std::getenv("GIPC_CASE"))
+    {
+        int requested_case = std::atoi(value);
+        if(requested_case < 1 || requested_case > 6)
+        {
+            std::cerr << "GIPC_CASE must be an integer in [1, 6]." << std::endl;
+            std::abort();
+        }
+        scene_no = requested_case - 1;
+    }
+    std::cout << "Running set_case" << scene_no + 1 << std::endl;
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!ABD must be loaded before FEM!!!!!!!!!!!!!!!!!!
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1252,13 +1253,6 @@ void initScene()
     ipc.tri_edge_num   = tetMesh.tri_edges.size();
 
     //ipc.IPC_dt = 0.01 / 1.0;//1.0 / 30;//1.0 / 100;
-    ipc.MAX_CCD_COLLITION_PAIRS_NUM =
-        1 * collision_detection_buff_scale
-        * (((double)(ipc.surface_Num * 15 + ipc.edge_Num * 10))
-           * std::max((ipc.IPC_dt / 0.01), 2.0));
-    ipc.MAX_COLLITION_PAIRS_NUM = (ipc.surf_vertexNum * 3 + ipc.edge_Num * 2)
-                                  * 3 * collision_detection_buff_scale;
-
     ipc.triangleNum        = tetMesh.triangleNum;
     ipc.targetVert         = d_tetMesh.targetVert;
     ipc.targetInd          = d_tetMesh.targetIndex;
@@ -1274,12 +1268,12 @@ void initScene()
            ipc.tetrahedraNum,
            ipc.surface_Num);
     printf("surfVertNum: %d      surfEdgesNum: %d\n", ipc.surf_vertexNum, ipc.edge_Num);
-    printf("maxCollisionPairsNum_CCD: %d      maxCollisionPairsNum: %d\n",
-           ipc.MAX_CCD_COLLITION_PAIRS_NUM,
-           ipc.MAX_COLLITION_PAIRS_NUM);
 
     //ipc.USE_MAS = false;
     ipc.MALLOC_DEVICE_MEM();
+    printf("initial collision capacities: DCD=%zu, CCD=%zu\n",
+           ipc._collisonPairs.capacity(),
+           ipc._ccd_collisonPairs.capacity());
 
     CUDA_SAFE_CALL(cudaMemcpy(
         ipc._faces, tetMesh.surface.data(), ipc.surface_Num * sizeof(uint3), cudaMemcpyHostToDevice));
@@ -1297,7 +1291,6 @@ void initScene()
         ipc.pcg_data.MP.initPreconditioner_Neighbor(ipc.vertexNum - tetMesh.abd_vertexOffset,
                                                     tetMesh.abd_vertexOffset,
                                                     neighborListSize,
-                                                    ipc._collisonPairs,
                                                     tetMesh.part_offset * BANKSIZE);
 
         ipc.pcg_data.MP.neighborListSize = neighborListSize;
@@ -1353,7 +1346,7 @@ void initScene()
         // Call precomputation function (defined in femEnergy.cu)
         PrepareQuadBendingQ(rest_verts_host.data(),
                             tetMesh.tri_edges.data(),
-                            tetMesh.tri_edges_adj_points.data(),  // CPU端叫tri_edges_adj_points
+                            tetMesh.tri_edges_adj_points.data(),  // named tri_edges_adj_points on the CPU side
                             tetMesh.tri_edges.size(),
                             Q_host.data());
 
@@ -1406,7 +1399,7 @@ void initScene()
 
 
     ipc.buildBVH();
-    ipc.init(tetMesh.meanMass, tetMesh.meanVolum, tetMesh.minConer, tetMesh.maxConer, linear_system_buff_scale);
+    ipc.init(tetMesh.meanMass, tetMesh.meanVolum, tetMesh.minConer, tetMesh.maxConer);
 
     printf("bboxDiagSize2: %f\n", ipc.bboxDiagSize2);
     printf("maxConer: %f  %f   %f           minCorner: %f  %f   %f\n",
@@ -1428,13 +1421,21 @@ void initScene()
 
     ipc.create_LinearSystem(d_tetMesh);
 
-    bvs.resize(2 * ipc.edge_Num - 1);
-    nodes.resize(2 * ipc.edge_Num - 1);
-    //CUDA_SAFE_CALL(cudaDeviceSynchronize());
-    CUDA_SAFE_CALL(cudaMemcpy(
-        &bvs[0], ipc.bvh_e._bvs, (2 * ipc.edge_Num - 1) * sizeof(AABB), cudaMemcpyDeviceToHost));
-    CUDA_SAFE_CALL(cudaMemcpy(
-        &nodes[0], ipc.bvh_e._nodes, (2 * ipc.edge_Num - 1) * sizeof(Node), cudaMemcpyDeviceToHost));
+    const size_t edge_bvh_node_count =
+        ipc.edge_Num > 0 ? 2 * static_cast<size_t>(ipc.edge_Num) - 1 : 0;
+    bvs.resize(edge_bvh_node_count);
+    nodes.resize(edge_bvh_node_count);
+    if(edge_bvh_node_count > 0)
+    {
+        CUDA_SAFE_CALL(cudaMemcpy(bvs.data(),
+                                  ipc.bvh_e._bvs.data(),
+                                  edge_bvh_node_count * sizeof(AABB),
+                                  cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(nodes.data(),
+                                  ipc.bvh_e._nodes.data(),
+                                  edge_bvh_node_count * sizeof(Node),
+                                  cudaMemcpyDeviceToHost));
+    }
 }
 
 
@@ -1521,10 +1522,17 @@ void display(void)
     }
 
 
-    CUDA_SAFE_CALL(cudaMemcpy(
-        &bvs[0], ipc.bvh_e._bvs, (2 * ipc.edge_Num - 1) * sizeof(AABB), cudaMemcpyDeviceToHost));
-    CUDA_SAFE_CALL(cudaMemcpy(
-        &nodes[0], ipc.bvh_e._nodes, (2 * ipc.edge_Num - 1) * sizeof(Node), cudaMemcpyDeviceToHost));
+    if(!bvs.empty())
+    {
+        CUDA_SAFE_CALL(cudaMemcpy(bvs.data(),
+                                  ipc.bvh_e._bvs.data(),
+                                  bvs.size() * sizeof(AABB),
+                                  cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaMemcpy(nodes.data(),
+                                  ipc.bvh_e._nodes.data(),
+                                  nodes.size() * sizeof(Node),
+                                  cudaMemcpyDeviceToHost));
+    }
     CUDA_SAFE_CALL(cudaMemcpy(tetMesh.vertexes.data(),
                               ipc._vertexes,
                               ipc.vertexNum * sizeof(double3),
@@ -1744,6 +1752,10 @@ void SpecialKey(GLint key, GLint x, GLint y)
 
 int main(int argc, char** argv)
 {
+    int batch_steps = 0;
+    if(const char* value = std::getenv("GIPC_STEPS"))
+        batch_steps = std::max(0, std::atoi(value));
+
     glutInit(&argc, argv);
     //glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA);
 
@@ -1755,6 +1767,41 @@ int main(int argc, char** argv)
     glutCreateWindow("FEM");
 
     init();
+
+    if(batch_steps > 0)
+    {
+        glutHideWindow();
+        for(int i = 0; i < batch_steps; ++i)
+            ipc.IPC_Solver(d_tetMesh);
+        checkCudaErrors(cudaDeviceSynchronize());
+        std::vector<double3> vertices(ipc.vertexNum);
+        checkCudaErrors(cudaMemcpy(vertices.data(),
+                                   ipc._vertexes,
+                                   vertices.size() * sizeof(double3),
+                                   cudaMemcpyDeviceToHost));
+        for(size_t i = 0; i < vertices.size(); ++i)
+        {
+            const auto& v = vertices[i];
+            if(!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z))
+            {
+                std::cerr << "Non-finite vertex at batch frame " << batch_steps
+                          << ", vertex " << i << std::endl;
+                return 3;
+            }
+        }
+        if(const char* dump_path = std::getenv("GIPC_DUMP_STATE"))
+        {
+            std::ofstream output(dump_path, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(vertices.data()),
+                         static_cast<std::streamsize>(vertices.size() * sizeof(double3)));
+            if(!output)
+            {
+                std::cerr << "Failed to write GIPC_DUMP_STATE to " << dump_path << std::endl;
+                return 2;
+            }
+        }
+        return 0;
+    }
 
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);

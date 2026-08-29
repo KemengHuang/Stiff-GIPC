@@ -7,7 +7,6 @@
 
 namespace cudatool {
 
-// Stubs for declared-but-unused types
 template <typename T, int N>
 class DeviceDoubletVector
 {
@@ -99,33 +98,11 @@ class DeviceDenseMatrix
         m_col = col;
         m_data.resize(row * col);
     }
-    void fill(T value)
-    {
-        for(size_t i = 0; i < m_data.size(); ++i)
-            cudaMemcpy(m_data.data() + i, &value, sizeof(T), cudaMemcpyHostToDevice);
-    }
+    void fill(T value) { m_data.view().fill(value); }
     size_t row() const { return m_row; }
     size_t col() const { return m_col; }
     T*       data() CT_NOEXCEPT { return m_data.data(); }
     const T* data() const CT_NOEXCEPT { return m_data.data(); }
-};
-
-template <typename T>
-class CCSRMatrixView
-{
-    int m_row = 0, m_col = 0, m_nnz = 0;
-
-  public:
-    CCSRMatrixView() = default;
-    CCSRMatrixView(int row, int col, const int*, const int*, const T*, int nnz) CT_NOEXCEPT
-        : m_row(row),
-          m_col(col),
-          m_nnz(nnz)
-    {
-    }
-    int rows() const { return m_row; }
-    int cols() const { return m_col; }
-    int non_zeros() const { return m_nnz; }
 };
 
 template <typename T>
@@ -164,7 +141,8 @@ class DeviceCSRMatrix
     auto col_indices() const { return m_col_indices.view(); }
 };
 
-// LinearSystemContext
+// LinearSystemContext: owns the cuBLAS/cuSPARSE handles and the stream
+// shared by the linear-system solvers.
 class LinearSystemContext
 {
     cublasHandle_t   m_cublas   = nullptr;
@@ -201,28 +179,6 @@ class LinearSystemContext
         cusparseSetStream(m_cusparse, s);
     }
     void sync() { cudaStreamSynchronize(m_stream); }
-
-    template <typename T>
-    T norm(CDenseVectorView<T> x)
-    {
-        return T(0);
-    }
-    template <typename T>
-    void dot(CDenseVectorView<T> x, CDenseVectorView<T> y, VarView<T> result)
-    {
-    }
-    template <typename T>
-    void axpby(const T& alpha, CDenseVectorView<T> x, const T& beta, DenseVectorView<T> y)
-    {
-    }
-    template <typename T>
-    void plus(CDenseVectorView<T> x, CDenseVectorView<T> y, DenseVectorView<T> z)
-    {
-    }
-    template <typename T>
-    void spmv(CCSRMatrixView<T> A, CDenseVectorView<T> x, DenseVectorView<T> y)
-    {
-    }
 };
 
 }  // namespace cudatool

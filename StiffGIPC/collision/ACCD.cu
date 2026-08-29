@@ -7,7 +7,7 @@
 //
 
 #include "ACCD.cuh"
-#include "gpu_eigen_libs.cuh"
+#include <math/gpu_eigen_libs.cuh>
 #include <cmath>
 #include <stdio.h>
 

@@ -1,5 +1,5 @@
 #pragma once
-#include <load_mesh.h>
+#include <io/load_mesh.h>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <gipc/body_type.h>

@@ -2,6 +2,7 @@
 #include <gipc/utils/timer.h>
 #include <gipc/statistics.h>
 #include <cuda_tools/cuda_tools.h>
+#include <cub/block/block_reduce.cuh>
 
 
 
@@ -9,49 +10,14 @@ __global__ void PCG_vdv_Reduction(double* squeue, const double* a, const double*
 {
     int idof = blockIdx.x * blockDim.x;
     int idx  = threadIdx.x + idof;
+    int valid_items = min(numbers - idof, static_cast<int>(blockDim.x));
+    double temp = idx < numbers ? a[idx] * b[idx] : 0.0;
 
-    extern __shared__ double tep[];
-
-    if(idx >= numbers)
-        return;
-
-    double temp = a[idx] * b[idx];
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    //double nextTp;
-    int    warpNum;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        warpNum = ((numbers - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        temp += __shfl_down_sync(0xffffffff, temp, i);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        temp = tep[threadIdx.x];
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            temp += __shfl_down_sync(0xffffffff, temp, i);
-        }
-    }
+    using BlockReduce = cub::BlockReduce<double, 256>;
+    __shared__ typename BlockReduce::TempStorage storage;
+    temp = BlockReduce(storage).Sum(temp, valid_items);
     if(threadIdx.x == 0)
-    {
         squeue[blockIdx.x] = temp;
-    }
 }
 
 
@@ -60,44 +26,14 @@ __global__ void add_reduction(double* mem, int numbers)
 {
     int idof = blockIdx.x * blockDim.x;
     int idx  = threadIdx.x + idof;
-    extern __shared__ double tep[];
-    if(idx >= numbers)
-        return;
-    double temp = mem[idx];
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    int    warpNum;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        warpNum = ((numbers - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        temp += __shfl_down_sync(0xffffffff, temp, i);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        temp = tep[threadIdx.x];
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            temp += __shfl_down_sync(0xffffffff, temp, i);
-        }
-    }
+    int valid_items = min(numbers - idof, static_cast<int>(blockDim.x));
+    double temp = idx < numbers ? mem[idx] : 0.0;
+
+    using BlockReduce = cub::BlockReduce<double, 256>;
+    __shared__ typename BlockReduce::TempStorage storage;
+    temp = BlockReduce(storage).Sum(temp, valid_items);
     if(threadIdx.x == 0)
-    {
         mem[blockIdx.x] = temp;
-    }
 }
 
 
@@ -145,7 +81,7 @@ double My_PCG_General_v_v_Reduction_Algorithm(double* temp, double* A, double* B
         blockNum = (numbers + threadNum - 1) / threadNum;
     }
     double result;
-    cudaMemcpy(&result, temp, sizeof(double), cudaMemcpyDeviceToHost);
+    CUDA_SAFE_CALL(cudaMemcpy(&result, temp, sizeof(double), cudaMemcpyDeviceToHost));
     return result;
 }
 
@@ -192,7 +128,7 @@ SizeT PCGSolver::pcg(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorV
                                                     z.size());
     }
 
-    p   = z;
+    p.copy_from(z);
     rz0 = rz;
 
     for(k = 1; k < max_iter; ++k)

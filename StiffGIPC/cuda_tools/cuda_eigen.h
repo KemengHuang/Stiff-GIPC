@@ -185,5 +185,3 @@ CT_GENERIC void evd(const Eigen::Matrix<T, N, N>& M,
 
 }  // namespace eigen
 }  // namespace cudatool
-
-#include "cuda_svd3x3.h"

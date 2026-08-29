@@ -6,7 +6,10 @@
 #include <gipc/utils/math.h>
 #include <gipc/utils/timer.h>
 #include "cuda_tools/cuda_tools.h"
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <limits>
 #include <vector>
 namespace gipc
 {
@@ -74,7 +77,7 @@ __device__ inline void write_triplet_cv2(Eigen::Matrix3d* triplet_value,
 
 
 template <typename T>
-__global__ inline void moveMemory_0(T* data, int output_start, int input_start, int length)
+__global__ void moveMemory_0(T* data, int output_start, int input_start, int length)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= length)
@@ -107,11 +110,11 @@ __global__ void write_barrier_hessian(//cudatool::TripletMatrixViewer<double, 12
 
 
     int          offset       = vI * 16 + start_output;
-    unsigned int index_row[4] = {
-        body_id_i * 4, body_id_i * 4 + 1, body_id_i * 4 + 2, body_id_i * 4 + 3};
+    const unsigned int row_base = static_cast<unsigned int>(body_id_i) * 4U;
+    unsigned int index_row[4] = {row_base, row_base + 1U, row_base + 2U, row_base + 3U};
 
-    unsigned int index_col[4] = {
-        body_id_j * 4, body_id_j * 4 + 1, body_id_j * 4 + 2, body_id_j * 4 + 3};
+    const unsigned int col_base = static_cast<unsigned int>(body_id_j) * 4U;
+    unsigned int index_col[4] = {col_base, col_base + 1U, col_base + 2U, col_base + 3U};
 
     if(is_fixed[body_id_i] == BodyBoundaryType::Fixed
        || is_fixed[body_id_j] == BodyBoundaryType::Fixed)
@@ -136,7 +139,8 @@ __global__ void write_abd_body_hessian(
     if(idx >= number)
         return;
     int          offset   = idx * 10;
-    unsigned int index[4] = {idx * 4, idx * 4 + 1, idx * 4 + 2, idx * 4 + 3};
+    const unsigned int base = static_cast<unsigned int>(idx) * 4U;
+    unsigned int index[4] = {base, base + 1U, base + 2U, base + 3U};
     write_triplet_cv(triplet, row, col, index, matrix_input[idx], offset);
 }
 
@@ -587,7 +591,7 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
         global_triplets.h_unique_key_number = 0;
     }
 
-    int bcooNum = global_triplets.h_unique_key_number; 
+    int bcooNum = global_triplets.h_unique_key_number;
 
     auto abd_body_count   = sim_data.abd_fem_count_info().abd_body_num;
     auto body_id_is_fixed = sim_data.body_id_to_boundary_type();
@@ -596,9 +600,23 @@ void ABDSystem::_setup_abd_system_hessian(ABDSimData& sim_data,
     auto body_hessian_size          = abd_body_count;
 
     global_triplets.abd_abd_contact_num = bcooNum;
-    int new_triplet_offset =
-        global_triplets.fem_fem_contact_num + global_triplets.abd_fem_contact_num * 4
-        + (global_triplets.abd_abd_contact_num * 16 + abd_body_count * 10);
+    size_t planned_triplet_offset =
+        static_cast<size_t>(global_triplets.fem_fem_contact_num)
+        + static_cast<size_t>(global_triplets.abd_fem_contact_num) * 4
+        + static_cast<size_t>(global_triplets.abd_abd_contact_num) * 16
+        + static_cast<size_t>(abd_body_count) * 10;
+    if(planned_triplet_offset > static_cast<size_t>(std::numeric_limits<int>::max()))
+    {
+        std::cerr << "ABD Hessian triplet count exceeds the 32-bit offset range."
+                  << std::endl;
+        std::abort();
+    }
+    int new_triplet_offset = static_cast<int>(planned_triplet_offset);
+
+    // The ABD assembly stages the re-organized triplets in the region right
+    // after the live one and compacts them back afterwards, so writes reach
+    // up to 2 * new_triplet_offset. Ensure capacity before writing.
+    global_triplets.ensure_triplet_capacity(2 * planned_triplet_offset);
 
     int h_abd_fem_contact_start_id = global_triplets.fem_fem_contact_num;
     int h_abd_abd_contact_start_id =

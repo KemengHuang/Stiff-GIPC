@@ -24,12 +24,12 @@ The code is released under **MPLv2.0**. The README explicitly states that commer
 |-----------|------------|-------|
 | Languages | C++17, CUDA C++17 | Heavy use of CUDA kernels and Thrust/CUB primitives |
 | Build system | CMake ≥ 3.18 | Single top-level `CMakeLists.txt` |
-| GPU compute | NVIDIA CUDA ≥ 11.0 | Uses cuSPARSE, cuBLAS, cuSOLVER |
-| Math/linear algebra | Eigen 3.4.0 | Host-side dense math; also used inside CUDA via muda |
+| GPU compute | NVIDIA CUDA ≥ 11.0 | Uses CUB, cuSPARSE, cuBLAS, cuSOLVER; active code does not use Thrust |
+| Math/linear algebra | Eigen 3.4.0 | Host-side dense math; also used inside CUDA via cuda_tools |
 | Visualization | FreeGLUT 3.4.0 + GLEW 2.2.0 + OpenGL | Interactive viewer in `gl_main.cu` |
 | JSON | nlohmann/json | Scene and config files |
 | Partitioning | METIS + GKlib | Preprocess meshes for domain decomposition (in `MeshProcess/`) |
-| CUDA wrapper library | muda | Header-only CUDA utility layer vendored under `StiffGIPC/muda/` |
+| CUDA wrapper library | cuda_tools | In-repo CUDA utility layer under `StiffGIPC/cuda_tools/` (the formerly vendored muda has been removed) |
 
 ### Build configurations hard-coded in CMake
 
@@ -59,33 +59,49 @@ Stiff-GIPC/
 │   ├── CMakeLists.txt
 │   ├── External/               # Vendored METIS + GKlib
 │   └── metis_partition/        # CLI tool that partitions meshes with METIS
-└── StiffGIPC/                  # Main simulation source code
-    ├── gl_main.cu              # Entry point: GLUT window, rendering, user input
-    ├── GIPC.cu / GIPC.cuh      # Core IPC data structures and per-step logic
-    ├── ACCD.cu / ACCD.cuh      # Adaptive Continuous Collision Detection
-    ├── FrictionUtils.cuh       # Friction-related CUDA helpers
-    ├── mlbvh.cu / mlbvh.cuh    # Linear BVH broad-phase collision detection
-    ├── femEnergy.cu/.cuh       # FEM elasticity energy/gradient/Hessian
-    ├── device_fem_data.cu/.cuh # Device FEM mesh/state representation
-    ├── load_mesh.cpp/.h        # Host-side mesh I/O (OBJ/MSH)
-    ├── generateVideo.py        # (Unused in build) utility script
+└── StiffGIPC/                  # Main simulation source code (include root for `<...>` paths)
+    ├── app/
+    │   └── gl_main.cu          # Entry point: GLUT window, rendering, user input
+    ├── core/                   # Core IPC system
+    │   ├── GIPC.cu / GIPC.cuh          # Main GIPC class: device state and per-step logic
+    │   ├── GIPC_PDerivative.cuh        # IPC barrier derivative kernels
+    │   ├── gipc_system.cu              # GIPC methods wiring ABD + linear-system assembly
+    │   ├── body_boundary_type.h
+    │   └── gipc_path.h                 # Baked asset/output path helpers
+    ├── collision/              # Collision detection & friction
+    │   ├── ACCD.cu / ACCD.cuh          # Adaptive Continuous Collision Detection
+    │   ├── mlbvh.cu / mlbvh.cuh        # Linear BVH broad-phase
+    │   └── FrictionUtils.cuh           # Friction-related CUDA helpers
+    ├── fem/                    # FEM deformable model
+    │   ├── femEnergy.cu/.cuh           # FEM elasticity energy/gradient/Hessian
+    │   ├── device_fem_data.cu/.cuh     # Device FEM mesh/state representation
+    │   └── fem_parameters.h
+    ├── solver/                 # Legacy solver stack still in active use
+    │   ├── PCG_SOLVER.cu/.cuh          # PCG_Data held by GIPC (pcg_data member)
+    │   └── MASPreconditioner.cu/.cuh   # MAS preconditioner (used when P_type == 1)
+    ├── math/                   # GPU math helpers
+    │   ├── gpu_eigen_libs.cu/.cuh      # __GEIGEN__ matrix/vector device math
+    │   ├── eigen_data.h
+    │   ├── QRSVD.hpp / givens.hpp      # 3x3 SVD via QR
+    ├── io/
+    │   └── load_mesh.cpp/.h    # Host-side mesh I/O (OBJ/MSH)
     ├── abd_system/             # Affine body dynamics system
-    ├── cuda_tools/             # Small CUDA helper wrappers
-    ├── gipc/                   # Common types, statistics, timer, scene importer, utilities
     ├── linear_system/          # Global linear system assembly + PCG solver + preconditioners
-    └── muda/                   # Vendored muda CUDA framework (header-only)
+    ├── cuda_tools/             # In-repo CUDA utility layer (device buffers, views, CUB wrappers)
+    └── gipc/                   # Common types, statistics, timer, scene importer, utilities
 ```
 
 ### Module responsibilities
 
-- **`gl_main.cu`** — Creates the OpenGL window, loads meshes via `SimpleSceneImporter`, initializes CUDA, builds the IPC system, and runs the per-frame simulation loop. It is also the only file with a `main()`.
-- **`GIPC.cu/.cuh`** — The main `GIPC` class holding device pointers for vertices, faces, edges, collision pairs, barrier/friction data, and the global triplet Hessian. Implements barrier energy, gradients, Hessians, line search, CCD, and Newton step logic.
+- **`app/gl_main.cu`** — Creates the OpenGL window, loads meshes via `SimpleSceneImporter`, initializes CUDA, builds the IPC system, and runs the per-frame simulation loop. It is also the only file with a `main()`.
+- **`core/GIPC.cu/.cuh`** — The main `GIPC` class holding device pointers for vertices, faces, edges, collision pairs, barrier/friction data, and the global triplet Hessian. Implements barrier energy, gradients, Hessians, line search, CCD, and Newton step logic. `core/gipc_system.cu` holds the `GIPC` methods that wire up the ABD system and the global linear system.
 - **`abd_system/`** — `ABDSystem` and `ABDSimData`: affine-body state (`q`, `q_tilde`, `q_prev`, `q_v`), Jacobians, dyadic mass, gravity, shape/kinetic energy, and system assembly. Contains the math that maps between affine DOFs and world positions.
 - **`linear_system/`** — `GlobalLinearSystem` assembles FEM + ABD subsystems (`fem_linear_subsystem`, `abd_linear_subsystem`) into a global matrix and solves it with a PCG solver (`pcg_solver`) and preconditioners (diagonal, ABD block-diagonal, FEM mass).
-- **`mlbvh.cu/.cuh`** — Broad-phase collision detection using a linear BVH on the GPU.
-- **`ACCD.cu/.cuh`** — Narrow-phase continuous collision detection and largest-feasible-step-size queries.
+- **`solver/`** — Legacy solver stack that is still actively used: `GIPC` owns a `PCG_Data pcg_data` member (defined in `PCG_SOLVER.cuh`), and its `MASPreconditioner MP` is passed into the new `MAS_Preconditioner` when `P_type == 1`. Do not delete; the two solver stacks are coupled.
+- **`collision/mlbvh.cu/.cuh`** — Broad-phase collision detection using a linear BVH on the GPU.
+- **`collision/ACCD.cu/.cuh`** — Narrow-phase continuous collision detection and largest-feasible-step-size queries.
 - **`MeshProcess/`** — Offline preprocessing: takes a tetrahedral mesh and writes a METIS partition file used by the FEM preconditioner/scattering code.
-- **`muda/`** — Vendored header-only CUDA abstraction library providing device buffers, linear algebra views, viewers, launch helpers, CUB wrappers, and compute-graph utilities.
+- **`cuda_tools/`** — In-repo CUDA utility layer (namespace `cudatool`) providing device buffers, buffer views, dense vectors, CUB wrappers, atomics and debug helpers. It replaced the formerly vendored `muda` library. `DeviceBuffer<T>` (in `cuda_buffer_view.h`) is the single owning buffer class used project-wide for device memory. `resize()` preserves the old logical range, `resize_discard()` adds geometric growth for fully regenerated outputs, and `resize_preserve()` combines geometric growth with preservation. `reserve()`/`reserve_amortized()` never change logical size. `DeviceBuffer` is move-only; use `copy_from()` for an intentional device-to-device value copy, and use `.data()`/a view when legacy code previously copied a raw pointer with `auto`. The implicit `operator T*()` exists only for legacy call sites; never cache it across a possible resize and never `cudaFree` it directly.
 
 ---
 
@@ -148,6 +164,15 @@ The executable uses hard-coded scene loading in `gl_main.cu`. It looks for files
 
 At runtime the GLUT window accepts keyboard/mouse input (defined in `gl_main.cu`). Common operations include stepping the simulation, saving the surface mesh, and taking screenshots. The code outputs `.obj` surface meshes to `Output/` when surface saving is enabled.
 
+For non-interactive validation, set `GIPC_STEPS` to a positive frame count. The program hides its GLUT window, advances exactly that many frames, then exits:
+
+```powershell
+$env:GIPC_STEPS = "1"
+.\build\Release\gipc.exe
+```
+
+Set `GIPC_CASE=1` through `6` to select `set_case1()` through `set_case6()` without editing source. Set `GIPC_DUMP_STATE` to a file path to write the final device vertex array as packed binary `double3` records for numerical regression comparisons.
+
 ---
 
 ## Code Style and Conventions
@@ -175,23 +200,28 @@ clang-format -i StiffGIPC/path/to/file.cu StiffGIPC/path/to/file.cuh
 - `PascalCase` for classes (`GIPC`, `ABDSystem`, `GlobalLinearSystem`).
 - `snake_case` for functions and member variables (`init_system`, `compute_energy`).
 - `m_` prefix for private member variables.
-- `gipc::` namespace wraps most project code; `muda::` is the CUDA utility namespace.
+- `gipc::` namespace wraps most project code; `cudatool::` is the CUDA utility namespace.
 - CUDA kernel files use `.cu` for implementation and `.cuh` for headers that contain device code.
 - Type aliases for vectors/matrices are centralized in `gipc/type_define.h` (`Vector3`, `Matrix12x12`, `Float = double`, etc.).
-- Device-buffer types from muda are used heavily (`muda::DeviceBuffer<T>`, `muda::DeviceVar<T>`, `muda::DeviceDenseVector<T>`).
+- Device-buffer types from cuda_tools are used heavily (`cudatool::DeviceBuffer<T>`, `cudatool::BufferView<T>`, `cudatool::DenseVectorView<T>`).
 
 ### Code organization patterns
 
 - Headers are included with angle brackets relative to `StiffGIPC/` (e.g. `#include <gipc/type_define.h>`).
 - Large classes split compute-heavy methods into `.cu` implementation files while keeping declarations in `.h`/`.cuh`.
 - Template/inline device code is placed in `.inl` files inside `details/` subdirectories and included from the main header.
-- The legacy GIPC core uses raw device pointers and Thrust; newer ABD/linear-system code uses `muda` buffer and linear-system abstractions.
+- The legacy GIPC core still has raw-pointer interfaces; active scans, sorts, reductions, and segmented reductions use CUB through persistent `cuda_tools` workspaces.
 
 ---
 
 ## Testing
 
-There is **no automated test suite** in this repository. `muda/` contains an external `catch2` header and its own CMake test/example options, but the StiffGIPC application itself has no tests.
+`dynamic_memory_tests` exercises zero-capacity device buffers, repeated preserving growth, collision count/grow/rerun, independent full-CCD growth, global-triplet workspace growth, contact partitions that start at zero, partial-warp segmented reduction, and persistent CUB scratch.
+
+```bash
+cmake --build build --config Release --target dynamic_memory_tests
+ctest --test-dir build -C Release --output-on-failure
+```
 
 ### Validation workflow
 
@@ -221,11 +251,11 @@ This produces a sorted `.msh`/`.obj` and a `.part` file in `Assets/sorted_mesh/`
 ## Common Hazards and Development Notes
 
 - **No `std::filesystem` path portability in GLUT paths**: asset paths are baked as compile definitions; moving the binary without the repository tree will break loading.
-- **Memory**: the `GIPC` class allocates large device buffers. Expanding resolution or collision buffers may require editing constants/reserve sizes in `GIPC.cuh`/`.cu`.
+- **Memory**: DCD pair/index buffers start with capacity 100,000 and the independent CCD buffer starts with capacity 1,000,000; logical sizes remain zero until detection. Global-Hessian live capacity starts from the exact fixed-energy triplet count plus `100000 * M12_Off` PT blocks. Values/rows/cols reserve twice that live estimate for disjoint conversion staging, while hash/index scratch reserves the live estimate. Overflow still uses guarded count/grow/re-run semantics. BVH and MAS receive current output pointers at each call rather than caching reallocatable addresses. Temporary friction/constraint buffers and per-thread CUB scratch retain capacity after warm-up.
 - **CUDA architecture mismatch**: if you get "no kernel image" errors, set `CMAKE_CUDA_ARCHITECTURES` to match your GPU.
 - **Feature flags are global**: toggling `USE_FRICTION`, `USE_SNK1`, etc. requires reconfiguring CMake because they are `target_compile_definitions`.
-- **Mixed coding styles**: the repository combines legacy raw-pointer GIPC code with newer muda-based ABD/linear-system code. When adding features, follow the style of the module you are touching.
-- **Visualization is not optional**: `gl_main.cu` links GLUT/GLEW and creates a window; there is currently no headless batch-mode entry point.
+- **Mixed coding styles**: the repository combines legacy raw-pointer GIPC code with newer cuda_tools-based ABD/linear-system code. When adding features, follow the style of the module you are touching.
+- **Visualization remains linked in batch mode**: `GIPC_STEPS` hides the GLUT window and provides deterministic finite-frame execution, but a working OpenGL context is still required.
 - **No CI/CD**: build verification and scene testing are manual.
 
 ---
@@ -234,12 +264,14 @@ This produces a sorted `.msh`/`.obj` and a `.part` file in `Assets/sorted_mesh/`
 
 | Task | Files to read first |
 |------|---------------------|
-| Build / dependencies | `CMakeLists.txt`, `MeshProcess/CMakeLists.txt`, `StiffGIPC/muda/CMakeLists.txt` |
-| Entry point / runtime flow | `StiffGIPC/gl_main.cu` |
-| Core IPC physics | `StiffGIPC/GIPC.cu`, `StiffGIPC/GIPC.cuh` |
+| Build / dependencies | `CMakeLists.txt`, `MeshProcess/CMakeLists.txt` |
+| Entry point / runtime flow | `StiffGIPC/app/gl_main.cu` |
+| Core IPC physics | `StiffGIPC/core/GIPC.cu`, `StiffGIPC/core/GIPC.cuh` |
 | Affine body dynamics | `StiffGIPC/abd_system/abd_system.h`, `StiffGIPC/abd_system/abd_sim_data.h` |
 | Linear solver | `StiffGIPC/linear_system/linear_system/global_linear_system.h`, `StiffGIPC/linear_system/solver/pcg_solver.h` |
-| Collision detection | `StiffGIPC/mlbvh.cuh`, `StiffGIPC/ACCD.cuh` |
+| Legacy solver / MAS preconditioner | `StiffGIPC/solver/PCG_SOLVER.cuh`, `StiffGIPC/solver/MASPreconditioner.cuh` |
+| Collision detection | `StiffGIPC/collision/mlbvh.cuh`, `StiffGIPC/collision/ACCD.cuh` |
+| FEM model | `StiffGIPC/fem/femEnergy.cuh`, `StiffGIPC/fem/device_fem_data.cuh` |
 | Types/aliases | `StiffGIPC/gipc/type_define.h` |
 | Scene loading | `StiffGIPC/gipc/utils/simple_scene_importer.h` |
 | Global parameters | `Assets/scene/parameterSetting.txt` |
@@ -248,4 +280,4 @@ This produces a sorted `.msh`/`.obj` and a `.part` file in `Assets/sorted_mesh/`
 
 ## Summary for Quick Orientation
 
-StiffGIPC is a single-CMake, C++/CUDA research application. It has no tests and no package manager manifest beyond CMake `find_package` calls. The build depends on CUDA, Eigen, FreeGLUT/GLEW, OpenGL, and nlohmann-json. The executable loads scene files from `Assets/`, runs a GPU IPC simulation loop, and visualizes with OpenGL. When editing, respect the existing mixed legacy/muda style, keep changes minimal, and validate by rebuilding and running a bundled scene.
+StiffGIPC is a single-CMake, C++/CUDA research application. It has no tests and no package manager manifest beyond CMake `find_package` calls. The build depends on CUDA, Eigen, FreeGLUT/GLEW, OpenGL, and nlohmann-json. The executable loads scene files from `Assets/`, runs a GPU IPC simulation loop, and visualizes with OpenGL. When editing, respect the existing mixed legacy/cuda_tools style, keep changes minimal, and validate by rebuilding and running a bundled scene.

@@ -15,11 +15,11 @@
 #include <cuda_runtime.h>
 #include <string>
 #include <sstream>
-#include "eigen_data.h"
+#include <math/eigen_data.h>
 #include <gipc/abd_fem_count_info.h>
 #include <gipc/body_type.h>
 #include <Eigen/Core>
-#include <body_boundary_type.h>
+#include <core/body_boundary_type.h>
 
 
 class mesh_obj

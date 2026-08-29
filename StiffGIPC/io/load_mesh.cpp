@@ -15,7 +15,7 @@
 #include <map>
 #include <iostream>
 #include <cfloat>
-#include "gpu_eigen_libs.cuh"
+#include <math/gpu_eigen_libs.cuh>
 #include "cstring"
 #include "Eigen/Eigen"
 using namespace std;

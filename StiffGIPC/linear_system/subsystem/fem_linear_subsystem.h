@@ -1,7 +1,7 @@
 #pragma once
 #include <linear_system/linear_system/linear_subsystem.h>
-#include <GIPC.cuh>
-#include <device_fem_data.cuh>
+#include <core/GIPC.cuh>
+#include <fem/device_fem_data.cuh>
 
 namespace gipc
 {

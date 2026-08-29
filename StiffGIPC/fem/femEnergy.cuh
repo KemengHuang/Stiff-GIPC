@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 #include "device_launch_parameters.h"
-#include "gpu_eigen_libs.cuh"
+#include <math/gpu_eigen_libs.cuh>
 #include "Eigen/Eigen"
 using namespace Eigen;
 __device__ __host__ void __calculateDm2D_double(const double3* vertexes,

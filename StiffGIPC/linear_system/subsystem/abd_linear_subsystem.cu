@@ -1,5 +1,5 @@
 #include <linear_system/subsystem/abd_linear_subsystem.h>
-#include <GIPC.cuh>
+#include <core/GIPC.cuh>
 #include <abd_system/abd_system.h>
 #include <abd_system/abd_sim_data.h>
 #include <cuda_tools/cuda_tools.h>

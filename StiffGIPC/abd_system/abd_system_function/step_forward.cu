@@ -47,7 +47,7 @@ void ABDSystem::copy_q_to_q_temp(ABDSimData& sim_data)
 {
     using namespace cudatool;
     auto& abd             = sim_data.device;
-    abd.body_id_to_q_temp = abd.body_id_to_q;
+    abd.body_id_to_q_temp.copy_from(abd.body_id_to_q);
 }
 
 void ABDSystem::step_forward(ABDSimData&                sim_data,

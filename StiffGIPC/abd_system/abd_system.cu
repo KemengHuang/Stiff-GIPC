@@ -2,17 +2,14 @@
 #include <cuda_tools/cuda_all.h>
 #include <gipc/utils/parallel_algorithm/transform.h>
 #include <gipc/utils/parallel_algorithm/scatter.h>
-#include <cuda_tools/cuda_all.h>
 #include <Eigen/Dense>
 #include <gipc/utils/print_buffer.h>
 #include <gipc/utils/math.h>
 #include <abd_system/abd_sim_data.h>
-#include <cuda_tools/cuda_all.h>
-#include <cuda_tools/cuda_all.h>
 #include <abd_system/abd_energy.h>
 #include <gipc/tet_local_info.h>
-#include <cuda_tools/cuda_all.h>
 #include <gipc/utils/host_log.h>
+#include <math/QRSVD.hpp>
 #include "cuda_tools/cuda_tools.h"
 
 namespace gipc
@@ -514,9 +511,9 @@ void ABDSystem::_setup_abd_state(size_t                        abd_count,
                              parms.init_q_v);
 
 
-    q_temp  = q;
-    q_tilde = q;
-    q_prev  = q;
+    q_temp.copy_from(q);
+    q_tilde.copy_from(q);
+    q_prev.copy_from(q);
 
     dq.resize(abd_count, Vector12::Zero());
     //q_v.resize(abd_count, Vector12::Zero());
@@ -583,7 +580,7 @@ CT_GENERIC Eigen::Matrix<double, 9, 9> compute_DRDF(const Matrix3x3& F)
 
     Matrix3x3 U, V;
     Vector3   sig;
-    cudatool::eigen::svd(F, U, sig, V);
+    __GEIGEN__::math::qr_svd(F, sig, U, V);
 
     double f = sig.sum();
 

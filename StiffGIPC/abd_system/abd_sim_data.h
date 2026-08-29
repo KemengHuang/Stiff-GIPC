@@ -3,7 +3,7 @@
 #include <abd_system/abd_jacobi_matrix.h>
 #include <gipc/abd_fem_count_info.h>
 #include <gipc/tet_local_info.h>
-#include <body_boundary_type.h>
+#include <core/body_boundary_type.h>
 
 class GIPC;
 class device_TetraData;

@@ -12,7 +12,7 @@ __global__ void _set_hash_value(const int* row_ids,
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= number)
         return;
-    index[idx]     = idx;
+    index[idx] = idx;
     //hashValue[idx] = (((uint64_t)rows[idx]) << 32) | ((uint64_t)cols[idx]);
     uint64_t self_hash;
     if(row_ids[idx] < abd_vert_num && col_ids[idx] < abd_vert_num)
@@ -35,18 +35,13 @@ __global__ void _set_hash_value(const int* row_ids,
 }
 
 
-
 void GIPCTripletMatrix::update_hash_value(int fem_offset)
 {
     //reset_zero();
+    resize_conversion_scratch(global_collision_triplet_offset);
+
     int threadNum = 256;
     int blockNum = (global_collision_triplet_offset + threadNum - 1) / threadNum;
-
-    if(global_collision_triplet_offset > global_external_max_capcity)
-    {
-        global_external_max_capcity = global_collision_triplet_offset;
-        resize_collision_hash_size(global_collision_triplet_offset);
-    }
 
     LaunchCudaKernal(blockNum,
                      threadNum,
@@ -59,4 +54,3 @@ void GIPCTripletMatrix::update_hash_value(int fem_offset)
                      fem_offset,
                      global_collision_triplet_offset);
 }
-

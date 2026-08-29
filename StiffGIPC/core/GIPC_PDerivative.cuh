@@ -11,7 +11,7 @@
 #define _GIPC_PDERIVATIVE_CUH_
 #include <cuda_runtime.h>
 #include "math.h"
-#include "gpu_eigen_libs.cuh"
+#include <math/gpu_eigen_libs.cuh>
 
 void pFpx_peeV0(double d,
                 double x11,

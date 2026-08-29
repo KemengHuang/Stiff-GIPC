@@ -2,27 +2,31 @@
 #include <cuda_tools/cuda_all.h>
 #include <gipc/utils/timer.h>
 #include <gipc/utils/parallel_algorithm/fast_segmental_reduce.h>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
 
 namespace
 {
-__global__ void compute_hash_and_index_kernel(int          length,
-                                              int*         row_indices,
-                                              int*         col_indices,
-                                              uint64_t*    ij_hash_input,
-                                              uint32_t*    index_input)
+__global__ void compute_hash_and_index_kernel(int       length,
+                                              int*      row_indices,
+                                              int*      col_indices,
+                                              uint64_t* ij_hash_input,
+                                              uint32_t* index_input)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= length)
         return;
     ij_hash_input[i] =
-        (uint64_t{row_indices[i]} << 32) + uint64_t{col_indices[i]};
-    index_input[i]   = i;
+        (uint64_t{static_cast<uint32_t>(row_indices[i])} << 32)
+        | uint64_t{static_cast<uint32_t>(col_indices[i])};
+    index_input[i] = i;
 }
 
-__global__ void set_dst_val_kernel(int                   length,
-                                   uint32_t*             sort_index,
-                                   Eigen::Matrix3d*      src_blocks,
-                                   Eigen::Matrix3d*      dst_val)
+__global__ void set_dst_val_kernel(int              length,
+                                   uint32_t*        sort_index,
+                                   Eigen::Matrix3d* src_blocks,
+                                   Eigen::Matrix3d* dst_val)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= length)
@@ -30,10 +34,10 @@ __global__ void set_dst_val_kernel(int                   length,
     dst_val[i] = src_blocks[sort_index[i]];
 }
 
-__global__ void set_row_col_from_unique_key_kernel(int          unique_count,
-                                                   int*         row_indices,
-                                                   int*         col_indices,
-                                                   uint64_t*    unique_key)
+__global__ void set_row_col_from_unique_key_kernel(int       unique_count,
+                                                   int*      row_indices,
+                                                   int*      col_indices,
+                                                   uint64_t* unique_key)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= unique_count)
@@ -42,9 +46,9 @@ __global__ void set_row_col_from_unique_key_kernel(int          unique_count,
     col_indices[i] = unique_key[i] & 0xffffffff;
 }
 
-__global__ void compute_sorted_partition_kernel(int             length,
-                                                uint32_t*       sorted_partition_input,
-                                                uint64_t*       ij_hash)
+__global__ void compute_sorted_partition_kernel(int length,
+                                                uint32_t* sorted_partition_input,
+                                                uint64_t* ij_hash)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= length)
@@ -52,11 +56,11 @@ __global__ void compute_sorted_partition_kernel(int             length,
     sorted_partition_input[i] = ij_hash[i] != ij_hash[i + 1] ? 1 : 0;
 }
 
-__global__ void set_row_col_from_partition_kernel(int             length,
-                                                  int*            row_indices,
-                                                  int*            col_indices,
-                                                  uint64_t*       ij_hash,
-                                                  uint32_t*       sorted_partition_output)
+__global__ void set_row_col_from_partition_kernel(int       length,
+                                                  int*      row_indices,
+                                                  int*      col_indices,
+                                                  uint64_t* ij_hash,
+                                                  uint32_t* sorted_partition_output)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= length)
@@ -79,33 +83,33 @@ __global__ void set_row_col_from_partition_kernel(int             length,
     }
 }
 
-__global__ void setup_ge2sym_kernel(int             unique_count,
-                                    int*            row_indices,
-                                    int*            col_indices,
-                                    uint64_t*       ij_hash,
+__global__ void setup_ge2sym_kernel(int              unique_count,
+                                    int*             row_indices,
+                                    int*             col_indices,
+                                    uint64_t*        ij_hash,
                                     Eigen::Matrix3d* blocks,
                                     Eigen::Matrix3d* block_temp,
-                                    uint32_t*       counts)
+                                    uint32_t*        counts)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= unique_count)
         return;
-    counts[i]    = row_indices[i] <= col_indices[i] ? 1 : 0;
-    ij_hash[i]   =
-        (uint64_t{row_indices[i]} << 32) + uint64_t{col_indices[i]};
+    counts[i]     = row_indices[i] <= col_indices[i] ? 1 : 0;
+    ij_hash[i] = (uint64_t{static_cast<uint32_t>(row_indices[i])} << 32)
+                 | uint64_t{static_cast<uint32_t>(col_indices[i])};
     block_temp[i] = blocks[i];
 }
 
-__global__ void finalize_ge2sym_kernel(int             unique_count,
+__global__ void finalize_ge2sym_kernel(int              unique_count,
                                        Eigen::Matrix3d* dst_blocks,
                                        Eigen::Matrix3d* block_temp,
-                                       uint64_t*       ij_hash,
-                                       int*            row_indices,
-                                       int*            col_indices,
-                                       uint32_t*       counts,
-                                       uint32_t*       offsets,
-                                       int*            total_count,
-                                       int             number)
+                                       uint64_t*        ij_hash,
+                                       int*             row_indices,
+                                       int*             col_indices,
+                                       uint32_t*        counts,
+                                       uint32_t*        offsets,
+                                       int*             total_count,
+                                       int              number)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= unique_count)
@@ -131,17 +135,40 @@ __global__ void finalize_ge2sym_kernel(int             unique_count,
 namespace gipc
 {
 
-constexpr bool UseRadixSort   = true;
-constexpr bool UseReduceByKey = false;
-
 void Converter::convert(GIPCTripletMatrix& global_triplets,
-                        const int&                          start,
-                        const int&                          length,
-                        const int&                          out_start_id)
+                        const int&         start,
+                        const int&         length,
+                        const int&         out_start_id)
 {
     gipc::Timer timer("convert3x3");
     if(length < 1)
         return;
+    if(start < 0 || out_start_id < 0)
+    {
+        std::cerr << "Triplet conversion received a negative input/output offset."
+                  << std::endl;
+        std::abort();
+    }
+
+    const size_t input_begin  = static_cast<size_t>(start);
+    const size_t output_begin = static_cast<size_t>(out_start_id);
+    const size_t item_count   = static_cast<size_t>(length);
+    if(input_begin > std::numeric_limits<size_t>::max() - item_count
+       || output_begin > std::numeric_limits<size_t>::max() - item_count)
+    {
+        std::cerr << "Triplet conversion range overflow." << std::endl;
+        std::abort();
+    }
+    const size_t input_end  = input_begin + item_count;
+    const size_t output_end = output_begin + item_count;
+    if(input_begin < output_end && output_begin < input_end)
+    {
+        std::cerr << "Triplet conversion input and staging ranges overlap." << std::endl;
+        std::abort();
+    }
+
+    global_triplets.prepare_conversion_workspace(input_begin, item_count, output_begin);
+
     _radix_sort_indices_and_blocks(global_triplets, start, length, out_start_id);
     //CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
@@ -156,7 +183,6 @@ void Converter::convert(GIPCTripletMatrix& global_triplets,
 }
 
 
-
 void Converter::_radix_sort_indices_and_blocks(GIPCTripletMatrix& global_triplets,
                                                const int& start,
                                                const int& length,
@@ -167,18 +193,11 @@ void Converter::_radix_sort_indices_and_blocks(GIPCTripletMatrix& global_triplet
     auto src_row_indices = global_triplets.block_row_indices(start);
     auto src_col_indices = global_triplets.block_col_indices(start);
     auto src_blocks      = global_triplets.block_values(start);
-    auto index_input   = global_triplets.block_index();
-    auto ij_hash_input = global_triplets.block_hash_value();
+    auto index_input     = global_triplets.block_index();
+    auto ij_hash_input   = global_triplets.block_hash_value();
 
-    LaunchCudaKernal_default(length,
-                             256,
-                             0,
-                             compute_hash_and_index_kernel,
-                             length,
-                             src_row_indices,
-                             src_col_indices,
-                             ij_hash_input,
-                             index_input);
+    LaunchCudaKernal_default(
+        length, 256, 0, compute_hash_and_index_kernel, length, src_row_indices, src_col_indices, ij_hash_input, index_input);
 
     DeviceRadixSort().SortPairs(ij_hash_input,
                                 global_triplets.block_sort_hash_value(),
@@ -187,14 +206,8 @@ void Converter::_radix_sort_indices_and_blocks(GIPCTripletMatrix& global_triplet
                                 length);
 
     auto dst_val = global_triplets.block_values() + out_start_id;
-    LaunchCudaKernal_default(length,
-                             256,
-                             0,
-                             set_dst_val_kernel,
-                             length,
-                             global_triplets.block_sort_index(),
-                             src_blocks,
-                             dst_val);
+    LaunchCudaKernal_default(
+        length, 256, 0, set_dst_val_kernel, length, global_triplets.block_sort_index(), src_blocks, dst_val);
 }
 
 
@@ -210,10 +223,10 @@ void Converter::_make_unique_indices(GIPCTripletMatrix& global_triplets,
     auto sort_key   = global_triplets.block_sort_hash_value();
 
     cudatool::DeviceRunLengthEncode().Encode(sort_key,
-                                         unique_key,
-                                         global_triplets.block_temp_buffer(),
-                                         global_triplets.d_unique_key_number,
-                                         length);
+                                             unique_key,
+                                             global_triplets.block_temp_buffer(),
+                                             global_triplets.d_unique_key_number,
+                                             length);
 
     CUDA_SAFE_CALL(cudaMemcpy(&(global_triplets.h_unique_key_number),
                               global_triplets.d_unique_key_number,
@@ -231,11 +244,10 @@ void Converter::_make_unique_indices(GIPCTripletMatrix& global_triplets,
 }
 
 
-
-
-
 void Converter::_make_unique_block_warp_reduction(GIPCTripletMatrix& global_triplets,
-                                                  const int& start, const int& length, const int& out_start_id)
+                                                  const int& start,
+                                                  const int& length,
+                                                  const int& out_start_id)
 {
     using namespace cudatool;
 
@@ -277,10 +289,11 @@ void Converter::_make_unique_block_warp_reduction(GIPCTripletMatrix& global_trip
                               0,
                               global_triplets.h_unique_key_number * sizeof(Eigen::Matrix3d)));
 
-    cudatool::parallel::FastSegmentalReduce<>::reduce(length,
-                                              sorted_partition_output,
-                                              global_triplets.block_values(out_start_id),
-                                              global_triplets.block_values(start));
+    cudatool::parallel::FastSegmentalReduce<>::reduce(
+        length,
+        sorted_partition_output,
+        global_triplets.block_values(out_start_id),
+        global_triplets.block_values(start));
 }
 
 void Converter::ge2sym(GIPCTripletMatrix& global_triplets)

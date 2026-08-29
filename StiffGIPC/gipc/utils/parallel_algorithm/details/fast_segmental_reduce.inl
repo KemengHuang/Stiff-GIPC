@@ -31,8 +31,7 @@ __global__ void fast_segmental_reduce_ptr_kernel(int                     length,
     __shared__ typename WarpReduceT::TempStorage t_storage[warp_count];
 
     int global_thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if(global_thread_id >= length)
-        return;
+    bool valid = global_thread_id < length;
 
     auto thread_id_in_block = threadIdx.x;
     auto warp_id            = thread_id_in_block / warp_size;
@@ -41,20 +40,21 @@ __global__ void fast_segmental_reduce_ptr_kernel(int                     length,
     int    prev_i  = -1;
     int    i       = -1;
     int    is_head = 0;
-    Matrix value;
+    Matrix value = Matrix::Zero();
 
-    if(global_thread_id > 0)
+    if(valid && global_thread_id > 0)
     {
         prev_i = offset_in[global_thread_id - 1];
     }
 
-    i     = offset_in[global_thread_id];
-    value = input[global_thread_id];
-
-    if(lane_id == 0 || prev_i != i)
+    if(valid)
     {
-        is_head = 1;
+        i       = offset_in[global_thread_id];
+        value   = input[global_thread_id];
+        is_head = lane_id == 0 || prev_i != i;
     }
+    else
+        is_head = 1;  // delimit the final real segment; this lane is discarded
 
     for(int j = 0; j < M; j++)
     {
@@ -63,10 +63,11 @@ __global__ void fast_segmental_reduce_ptr_kernel(int                     length,
             value(j, k) =
                 WarpReduceT(t_storage[warp_id])
                     .HeadSegmentedReduce(value(j, k), is_head, op);
+            __syncwarp();  // temp storage is reused for the next matrix entry
         }
     }
 
-    if(is_head)
+    if(valid && is_head)
     {
         cudatool::eigen::atomic_add(output[i], value);
     }
@@ -91,8 +92,7 @@ __global__ void fast_segmental_reduce_matrix_view_kernel(
     __shared__ typename WarpReduceT::TempStorage t_storage[warp_count];
 
     int global_thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if(global_thread_id >= size)
-        return;
+    bool valid = global_thread_id < size;
 
     auto thread_id_in_block = threadIdx.x;
     auto warp_id            = thread_id_in_block / warp_size;
@@ -101,20 +101,21 @@ __global__ void fast_segmental_reduce_matrix_view_kernel(
     int    prev_i  = -1;
     int    i       = -1;
     int    is_head = 0;
-    Matrix value;
+    Matrix value = Matrix::Zero();
 
-    if(global_thread_id > 0)
+    if(valid && global_thread_id > 0)
     {
         prev_i = offset[global_thread_id - 1];
     }
 
-    i     = offset[global_thread_id];
-    value = in[global_thread_id];
-
-    if(lane_id == 0 || prev_i != i)
+    if(valid)
     {
-        is_head = 1;
+        i       = offset[global_thread_id];
+        value   = in[global_thread_id];
+        is_head = lane_id == 0 || prev_i != i;
     }
+    else
+        is_head = 1;
 
     for(int j = 0; j < M; j++)
     {
@@ -123,10 +124,11 @@ __global__ void fast_segmental_reduce_matrix_view_kernel(
             value(j, k) =
                 WarpReduceT(t_storage[warp_id])
                     .HeadSegmentedReduce(value(j, k), is_head, op);
+            __syncwarp();
         }
     }
 
-    if(is_head)
+    if(valid && is_head)
     {
         auto& out_value = out[i];
         cudatool::eigen::atomic_add(out_value, value);
@@ -147,18 +149,11 @@ __global__ void fast_segmental_reduce_scalar_view_kernel(int       size,
     constexpr int block_dim  = BlockSize;
     constexpr int warp_count = block_dim / warp_size;
 
-    using WarpReduceInt = cub::WarpReduce<int, warp_size>;
-    using WarpReduceT   = cub::WarpReduce<T, warp_size>;
-
-    __shared__ union
-    {
-        typename WarpReduceInt::TempStorage index_storage[warp_count];
-        typename WarpReduceT::TempStorage t_storage[warp_count];
-    };
+    using WarpReduceT = cub::WarpReduce<T, warp_size>;
+    __shared__ typename WarpReduceT::TempStorage t_storage[warp_count];
 
     int global_thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if(global_thread_id >= size)
-        return;
+    bool valid = global_thread_id < size;
 
     auto thread_id_in_block = threadIdx.x;
     auto warp_id            = thread_id_in_block / warp_size;
@@ -167,24 +162,25 @@ __global__ void fast_segmental_reduce_scalar_view_kernel(int       size,
     int    prev_i  = -1;
     int    i       = -1;
     int    is_head = 0;
-    ValueT value;
+    ValueT value{};
 
-    if(global_thread_id > 0)
+    if(valid && global_thread_id > 0)
     {
         prev_i = offset[global_thread_id - 1];
     }
 
-    i     = offset[global_thread_id];
-    value = in[global_thread_id];
-
-    if(lane_id == 0 || prev_i != i)
+    if(valid)
     {
-        is_head = 1;
+        i       = offset[global_thread_id];
+        value   = in[global_thread_id];
+        is_head = lane_id == 0 || prev_i != i;
     }
+    else
+        is_head = 1;
 
     value = WarpReduceT(t_storage[warp_id]).HeadSegmentedReduce(value, is_head, op);
 
-    if(is_head)
+    if(valid && is_head)
     {
         auto& out_value = out[i];
         cudatool::atomic_add(&out_value, value);

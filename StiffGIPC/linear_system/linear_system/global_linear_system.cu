@@ -98,7 +98,6 @@ DiagonalSubsystem& GlobalLinearSystem::_create_subsystem(U<DiagonalSubsystem>&& 
 }
 
 
-
 IterativeSolver& GlobalLinearSystem::_create_solver(U<IterativeSolver>&& solver)
 {
     m_solver = std::move(solver);
@@ -150,7 +149,7 @@ Json GlobalLinearSystem::as_json() const
     return j;
 }
 
-void GlobalLinearSystem::apply_preconditioner(cudatool::DenseVectorView<Float>  z,
+void GlobalLinearSystem::apply_preconditioner(cudatool::DenseVectorView<Float> z,
                                               cudatool::CDenseVectorView<Float> r)
 {
     // first apply global preconditioner
@@ -166,23 +165,31 @@ void GlobalLinearSystem::apply_preconditioner(cudatool::DenseVectorView<Float>  
 }
 
 
-
 void GlobalLinearSystem::convert_new()
 {
+    size_t final_triplet_count =
+        static_cast<size_t>(gipc_global_triplet->global_triplet_offset);
+    gipc_global_triplet->ensure_triplet_capacity(2 * final_triplet_count);
+    gipc_global_triplet->resize_conversion_scratch(final_triplet_count);
+
     m_converter.convert(*gipc_global_triplet,
                         0,
                         gipc_global_triplet->global_triplet_offset,
                         gipc_global_triplet->global_triplet_offset);
-//#ifndef SymGH
-//    m_converter.ge2sym(*gipc_global_triplet);
-//#endif
+
+    // Conversion has compacted the matrix into the prefix. Keep the
+    // allocation, but expose only live unique blocks to downstream users.
+    gipc_global_triplet->resize_triplets(
+        static_cast<size_t>(gipc_global_triplet->h_unique_key_number));
+    //#ifndef SymGH
+    //    m_converter.ge2sym(*gipc_global_triplet);
+    //#endif
 }
 
 
-
-void GlobalLinearSystem::spmv(Float                         a,
+void GlobalLinearSystem::spmv(Float                             a,
                               cudatool::CDenseVectorView<Float> x,
-                              Float                         b,
+                              Float                             b,
                               cudatool::DenseVectorView<Float>  y)
 {
 

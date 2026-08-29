@@ -1,6 +1,6 @@
 #include <abd_system/abd_sim_data.h>
-#include <GIPC.cuh>
-#include <device_fem_data.cuh>
+#include <core/GIPC.cuh>
+#include <fem/device_fem_data.cuh>
 #include <cuda_tools/cuda_all.h>
 #include "cuda_tools/cuda_tools.h"
 #include <numeric>

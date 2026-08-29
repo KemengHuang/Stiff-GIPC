@@ -7,15 +7,14 @@
 //
 
 #include "mlbvh.cuh"
+#include <cfloat>
 #include <cmath>
 #include "cuda_tools/cuda_tools.h"
-#include <thrust/sort.h>
-#include <thrust/sequence.h>
-#include <thrust/device_ptr.h>
+#include <cuda_tools/cuda_cub_wrappers.h>
 #include <iostream>
 #include <fstream>
-#include "gpu_eigen_libs.cuh"
-
+#include <utility>
+#include <math/gpu_eigen_libs.cuh>
 
 
 __device__ __host__ inline AABB merge(const AABB& lhs, const AABB& rhs) noexcept
@@ -28,6 +27,21 @@ __device__ __host__ inline AABB merge(const AABB& lhs, const AABB& rhs) noexcept
     merged.lower.y = std::min(lhs.lower.y, rhs.lower.y);
     merged.lower.z = std::min(lhs.lower.z, rhs.lower.z);
     return merged;
+}
+
+struct MergeAABB
+{
+    __device__ __host__ AABB operator()(const AABB& lhs, const AABB& rhs) const noexcept
+    {
+        return merge(lhs, rhs);
+    }
+};
+
+__global__ void fill_bvh_indices_kernel(uint32_t* indices, int number)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i < number)
+        indices[i] = static_cast<uint32_t>(i);
 }
 
 __device__ __host__ inline bool overlap(const AABB& lhs, const AABB& rhs, const double& gapL) noexcept
@@ -48,6 +62,11 @@ __device__ __host__ inline double3 centroid(const AABB& box) noexcept
     c.y = (box.upper.y + box.lower.y) * 0.5;
     c.z = (box.upper.z + box.lower.z) * 0.5;
     return c;
+}
+
+__device__ __host__ inline double normalized_axis(double offset, double extent) noexcept
+{
+    return extent > 0.0 ? offset / extent : 0.0;
 }
 
 __device__ __host__ inline std::uint32_t expand_bits(std::uint32_t v) noexcept
@@ -114,8 +133,8 @@ __host__ __device__ double3 AABB::center()
 
 __device__ __host__ AABB::AABB()
 {
-    lower = make_double3(1e32, 1e32, 1e32);
-    upper = make_double3(-1e32, -1e32, -1e32);
+    lower = make_double3(DBL_MAX, DBL_MAX, DBL_MAX);
+    upper = make_double3(-DBL_MAX, -DBL_MAX, -DBL_MAX);
 }
 
 //__device__
@@ -532,16 +551,17 @@ __device__ int _dType_EE(const double3& v0, const double3& v1, const double3& v2
 }
 
 
-__device__ inline bool _checkPTintersection(const double3*  _vertexes,
-                                            const uint32_t& id0,
-                                            const uint32_t& id1,
-                                            const uint32_t& id2,
-                                            const uint32_t& id3,
+__device__ inline void _checkPTintersection(const double3* _vertexes,
+                                            int            id0,
+                                            int            id1,
+                                            int            id2,
+                                            int            id3,
                                             const double&   dHat,
                                             uint32_t*       _cpNum,
                                             int*            _mInx,
                                             int4*           _collisionPair,
-                                            int4* _ccd_collisionPair) noexcept
+                                            int4* _ccd_collisionPair,
+                                            uint32_t pair_capacity) noexcept
 {
     double3 v0 = _vertexes[id0];
     double3 v1 = _vertexes[id1];
@@ -558,7 +578,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, -1, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 2, 1);
@@ -571,7 +593,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id2, -1, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 2, 1);
@@ -584,7 +608,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id3, -1, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 2, 1);
@@ -597,7 +623,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 3, 1);
@@ -610,7 +638,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id2, id3, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 3, 1);
@@ -623,7 +653,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id3, id1, -1);
                 _mInx[cdp_idx]          = atomicAdd(_cpNum + 3, 1);
@@ -636,7 +668,9 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
             if(d < dHat)
             {
                 //printf("%d   %d   %d   %d   %d   %f\n", dtype, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, d);
-                int cdp_idx = atomicAdd(_cpNum, 1);
+                uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                if(cdp_idx >= pair_capacity)
+                    break;  // count only, no write past capacity; host grows the buffer and re-runs
                 _ccd_collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 _collisionPair[cdp_idx] = make_int4(-id0 - 1, id1, id2, id3);
                 //printf("ccbcbcbcbbcbcbbcbcb  %d  %d  %d  %d\n", -id0 - 1, id1, id2, id3);
@@ -650,51 +684,20 @@ __device__ inline bool _checkPTintersection(const double3*  _vertexes,
     }
 }
 
-__device__ inline bool _checkPTintersection_fullCCD(const double3*  _vertexes,
-                                                    const uint32_t& id0,
-                                                    const uint32_t& id1,
-                                                    const uint32_t& id2,
-                                                    const uint32_t& id3,
-                                                    const double&   dHat,
-                                                    uint32_t*       _cpNum,
-                                                    int4* _ccd_collisionPair) noexcept
-{
-    double3 v0 = _vertexes[id0];
-    double3 v1 = _vertexes[id1];
-    double3 v2 = _vertexes[id2];
-    double3 v3 = _vertexes[id3];
-
-    int dtype = _dType_PT(v0, v1, v2, v3);
-
-    double3 basis0 = __GEIGEN__::__minus(v2, v1);
-    double3 basis1 = __GEIGEN__::__minus(v3, v1);
-    double3 basis2 = __GEIGEN__::__minus(v0, v1);
-
-    const double3 nVec = __GEIGEN__::__v_vec_cross(basis0, basis1);
-
-    double sign = __GEIGEN__::__v_vec_dot(nVec, basis2);
-
-    if(dtype == 6 && (sign < 0))
-    {
-        return;
-    }
-
-    _ccd_collisionPair[atomicAdd(_cpNum, 1)] = make_int4(-id0 - 1, id1, id2, id3);
-}
-
-__device__ inline bool _checkEEintersection(const double3*  _vertexes,
-                                            const double3*  _rest_vertexes,
-                                            const uint32_t& id0,
-                                            const uint32_t& id1,
-                                            const uint32_t& id2,
-                                            const uint32_t& id3,
-                                            const uint32_t& obj_idx,
+__device__ inline void _checkEEintersection(const double3* _vertexes,
+                                            const double3* _rest_vertexes,
+                                            int            id0,
+                                            int            id1,
+                                            int            id2,
+                                            int            id3,
+                                            int            obj_idx,
                                             const double&   dHat,
                                             uint32_t*       _cpNum,
                                             int*            MatIndex,
                                             int4*           _collisionPair,
                                             int4*           _ccd_collisionPair,
-                                            int             edgeNum) noexcept
+                                            int             edgeNum,
+                                            uint32_t        pair_capacity) noexcept
 {
     double3 v0 = _vertexes[id0];
     double3 v1 = _vertexes[id1];
@@ -723,7 +726,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -738,7 +743,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id0 - 1, id2, -1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 2, 1);
@@ -762,7 +769,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -776,7 +785,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id0 - 1, id3, -1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 2, 1);
@@ -801,7 +812,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -815,7 +828,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id0 - 1, id2, id3, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 3, 1);
@@ -839,7 +854,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -853,7 +870,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id1 - 1, id2, -1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 2, 1);
@@ -877,7 +896,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -891,7 +912,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id1 - 1, id3, -1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 2, 1);
@@ -915,7 +938,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -929,7 +954,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id1 - 1, id2, id3, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 3, 1);
@@ -954,7 +981,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -968,7 +997,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id2 - 1, id0, id1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 3, 1);
@@ -993,7 +1024,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
 
                 if(add_e <= -2)
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
                     {
@@ -1007,7 +1040,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 }
                 else
                 {
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx] = make_int4(-id3 - 1, id0, id1, add_e);
                     MatIndex[cdp_idx] = atomicAdd(_cpNum + 3, 1);
@@ -1032,7 +1067,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 if(add_e <= -2)
                 {
                     //printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxx\n");
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     MatIndex[cdp_idx]           = atomicAdd(_cpNum + 4, 1);
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     if(smooth)
@@ -1045,7 +1082,9 @@ __device__ inline bool _checkEEintersection(const double3*  _vertexes,
                 else
                 {
 
-                    int cdp_idx                 = atomicAdd(_cpNum, 1);
+                    uint32_t cdp_idx            = atomicAdd(_cpNum, 1U);
+                    if(cdp_idx >= pair_capacity)
+                        break;  // count only, no write past capacity; host grows the buffer and re-runs
                     _ccd_collisionPair[cdp_idx] = make_int4(id0, id1, id2, id3);
                     _collisionPair[cdp_idx]     = make_int4(id0, id1, id2, id3);
                     MatIndex[cdp_idx]           = atomicAdd(_cpNum + 4, 1);
@@ -1218,8 +1257,9 @@ __global__ void _calcMChash(uint64_t* _MChash, AABB* _bvs, int number)
                                   centerP.z - maxBv.lower.z);
 
     //printf("%d   %f     %f     %f\n", offset.x, offset.y, offset.z);
-    uint64_t mc32 = morton_code(
-        offset.x / SceneSize.x, offset.y / SceneSize.y, offset.z / SceneSize.z);
+    uint64_t mc32 = morton_code(normalized_axis(offset.x, SceneSize.x),
+                                normalized_axis(offset.y, SceneSize.y),
+                                normalized_axis(offset.z, SceneSize.z));
     uint64_t mc64 = ((mc32 << 32) | idx);
     _MChash[idx]  = mc64;
 }
@@ -1315,13 +1355,14 @@ __global__ void _selfQuery_vf(const int*      _bodyID,
                               uint32_t*       _cpNum,
                               int*            MatIndex,
                               double          dHat,
+                              uint32_t        pair_capacity,
                               int             number)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= number)
         return;
 
-    uint32_t  stack[64];
+    uint32_t  stack[65];  // a unique 64-bit Morton key bounds LBVH depth by 64
     uint32_t* stack_ptr = stack;
     *stack_ptr++        = 0;
 
@@ -1332,6 +1373,31 @@ __global__ void _selfQuery_vf(const int*      _bodyID,
     //double bboxDiagSize2 = __GEIGEN__::__squaredNorm(__GEIGEN__::__minus(_bvs[0].upper, _bvs[0].lower));
     //printf("%f\n", bboxDiagSize2);
     double gapl = sqrt(dHat);  //0.001 * sqrt(bboxDiagSize2);
+    const auto root_object = _nodes[0].element_idx;
+    if(root_object != 0xFFFFFFFF)
+    {
+        if(overlap(_bv, _bvs[0], gapl)
+           && ((_bodyID[idx] != _bodyID[_faces[root_object].x]) || (_bodyID[idx] == -1))
+           && idx != _faces[root_object].x && idx != _faces[root_object].y
+           && idx != _faces[root_object].z
+           && !(_btype[idx] >= 2 && _btype[_faces[root_object].x] >= 2
+                && _btype[_faces[root_object].y] >= 2
+                && _btype[_faces[root_object].z] >= 2))
+        {
+            _checkPTintersection(_vertexes,
+                                 idx,
+                                 _faces[root_object].x,
+                                 _faces[root_object].y,
+                                 _faces[root_object].z,
+                                 dHat,
+                                 _cpNum,
+                                 MatIndex,
+                                 _collisionPair,
+                                 _ccd_collisionPair,
+                                 pair_capacity);
+        }
+        return;
+    }
     //double dHat = gapl * gapl;// *bboxDiagSize2;
     unsigned int num_found = 0;
     do
@@ -1362,7 +1428,8 @@ __global__ void _selfQuery_vf(const int*      _bodyID,
                                                  _cpNum,
                                                  MatIndex,
                                                  _collisionPair,
-                                                 _ccd_collisionPair);
+                                                 _ccd_collisionPair,
+                                                 pair_capacity);
                     }
                 }
             }
@@ -1393,7 +1460,8 @@ __global__ void _selfQuery_vf(const int*      _bodyID,
                                                  _cpNum,
                                                  MatIndex,
                                                  _collisionPair,
-                                                 _ccd_collisionPair);
+                                                 _ccd_collisionPair,
+                                                 pair_capacity);
                     }
                 }
             }
@@ -1417,13 +1485,14 @@ __global__ void _selfQuery_vf_ccd(const int*      _bodyID,
                                   int4*           _ccd_collisionPair,
                                   uint32_t*       _cpNum,
                                   double          dHat,
+                                  uint32_t        pair_capacity,
                                   int             number)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= number)
         return;
 
-    uint32_t  stack[64];
+    uint32_t  stack[65];
     uint32_t* stack_ptr = stack;
     *stack_ptr++        = 0;
 
@@ -1439,6 +1508,26 @@ __global__ void _selfQuery_vf_ccd(const int*      _bodyID,
     //double bboxDiagSize2 = __GEIGEN__::__squaredNorm(__GEIGEN__::__minus(_bvs[0].upper, _bvs[0].lower));
     //printf("%f\n", bboxDiagSize2);
     double gapl = sqrt(dHat);  //0.001 * sqrt(bboxDiagSize2);
+    const auto root_object = _nodes[0].element_idx;
+    if(root_object != 0xFFFFFFFF)
+    {
+        if(overlap(_bv, _bvs[0], gapl)
+           && ((_bodyID[idx] != _bodyID[_faces[root_object].x]) || (_bodyID[idx] == -1))
+           && idx != _faces[root_object].x && idx != _faces[root_object].y
+           && idx != _faces[root_object].z
+           && !(_btype[idx] >= 2 && _btype[_faces[root_object].x] >= 2
+                && _btype[_faces[root_object].y] >= 2
+                && _btype[_faces[root_object].z] >= 2))
+        {
+            uint32_t slot = atomicAdd(_cpNum, 1U);
+            if(slot < pair_capacity)
+                _ccd_collisionPair[slot] = make_int4(-idx - 1,
+                                                      _faces[root_object].x,
+                                                      _faces[root_object].y,
+                                                      _faces[root_object].z);
+        }
+        return;
+    }
     //double dHat = gapl * gapl;// *bboxDiagSize2;
     unsigned int num_found = 0;
     do
@@ -1461,11 +1550,13 @@ __global__ void _selfQuery_vf_ccd(const int*      _bodyID,
                         if(idx != _faces[obj_idx].x && idx != _faces[obj_idx].y
                            && idx != _faces[obj_idx].z)
                         {
-                            _ccd_collisionPair[atomicAdd(_cpNum, 1)] =
-                                make_int4(-idx - 1,
-                                          _faces[obj_idx].x,
-                                          _faces[obj_idx].y,
-                                          _faces[obj_idx].z);
+                            uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                            if(cdp_idx < pair_capacity)
+                                _ccd_collisionPair[cdp_idx] =
+                                    make_int4(-idx - 1,
+                                              _faces[obj_idx].x,
+                                              _faces[obj_idx].y,
+                                              _faces[obj_idx].z);
                             //_checkPTintersection_fullCCD(_vertexes, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, dHat, _cpNum, _ccd_collisionPair);
                         }
                 }
@@ -1488,11 +1579,13 @@ __global__ void _selfQuery_vf_ccd(const int*      _bodyID,
                         if(idx != _faces[obj_idx].x && idx != _faces[obj_idx].y
                            && idx != _faces[obj_idx].z)
                         {
-                            _ccd_collisionPair[atomicAdd(_cpNum, 1)] =
-                                make_int4(-idx - 1,
-                                          _faces[obj_idx].x,
-                                          _faces[obj_idx].y,
-                                          _faces[obj_idx].z);
+                            uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                            if(cdp_idx < pair_capacity)
+                                _ccd_collisionPair[cdp_idx] =
+                                    make_int4(-idx - 1,
+                                              _faces[obj_idx].x,
+                                              _faces[obj_idx].y,
+                                              _faces[obj_idx].z);
                             //_checkPTintersection_fullCCD(_vertexes, idx, _faces[obj_idx].x, _faces[obj_idx].y, _faces[obj_idx].z, dHat, _cpNum, _ccd_collisionPair);
                         }
                 }
@@ -1518,13 +1611,14 @@ __global__ void _selfQuery_ee(const int*     _bodyID,
                               uint32_t*      _cpNum,
                               int*           MatIndex,
                               double         dHat,
+                              uint32_t       pair_capacity,
                               int            number)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= number)
         return;
 
-    uint32_t  stack[64];
+    uint32_t  stack[65];
     uint32_t* stack_ptr = stack;
     *stack_ptr++        = 0;
 
@@ -1576,7 +1670,8 @@ __global__ void _selfQuery_ee(const int*     _bodyID,
                                                      MatIndex,
                                                      _collisionPair,
                                                      _ccd_collisionPair,
-                                                     number);
+                                                     number,
+                                                     pair_capacity);
                         }
                     }
                 }
@@ -1618,7 +1713,8 @@ __global__ void _selfQuery_ee(const int*     _bodyID,
                                                      MatIndex,
                                                      _collisionPair,
                                                      _ccd_collisionPair,
-                                                     number);
+                                                     number,
+                                                     pair_capacity);
                         }
                     }
                 }
@@ -1642,13 +1738,14 @@ __global__ void _selfQuery_ee_ccd(const int*     _bodyID,
                                   int4*          _ccd_collisionPair,
                                   uint32_t*      _cpNum,
                                   double         dHat,
+                                  uint32_t       pair_capacity,
                                   int            number)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= number)
         return;
 
-    uint32_t  stack[64];
+    uint32_t  stack[65];
     uint32_t* stack_ptr   = stack;
     *stack_ptr++          = 0;
     idx                   = idx + number - 1;
@@ -1687,11 +1784,13 @@ __global__ void _selfQuery_ee_ccd(const int*     _bodyID,
                                  || current_edge.y == _edges[obj_idx].x
                                  || current_edge.y == _edges[obj_idx].y || obj_idx < self_eid))
                             {
-                                _ccd_collisionPair[atomicAdd(_cpNum, 1)] =
-                                    make_int4(current_edge.x,
-                                              current_edge.y,
-                                              _edges[obj_idx].x,
-                                              _edges[obj_idx].y);
+                            uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                                if(cdp_idx < pair_capacity)
+                                    _ccd_collisionPair[cdp_idx] =
+                                        make_int4(current_edge.x,
+                                                  current_edge.y,
+                                                  _edges[obj_idx].x,
+                                                  _edges[obj_idx].y);
                             }
                     }
                 }
@@ -1720,11 +1819,13 @@ __global__ void _selfQuery_ee_ccd(const int*     _bodyID,
                                  || current_edge.y == _edges[obj_idx].x
                                  || current_edge.y == _edges[obj_idx].y || obj_idx < self_eid))
                             {
-                                _ccd_collisionPair[atomicAdd(_cpNum, 1)] =
-                                    make_int4(current_edge.x,
-                                              current_edge.y,
-                                              _edges[obj_idx].x,
-                                              _edges[obj_idx].y);
+                            uint32_t cdp_idx = atomicAdd(_cpNum, 1U);
+                                if(cdp_idx < pair_capacity)
+                                    _ccd_collisionPair[cdp_idx] =
+                                        make_int4(current_edge.x,
+                                                  current_edge.y,
+                                                  _edges[obj_idx].x,
+                                                  _edges[obj_idx].y);
                             }
                     }
                 }
@@ -1742,33 +1843,18 @@ __global__ void _selfQuery_ee_ccd(const int*     _bodyID,
 
 AABB calcMaxBV(AABB* _leafBoxes, AABB* _tempLeafBox, const int& number)
 {
-
-    int                numbers   = number;
-    const unsigned int threadNum = default_threads;
-    int                blockNum  = (numbers + threadNum - 1) / threadNum;
-
-    unsigned int sharedMsize = sizeof(AABB) * (threadNum >> 5);
-
-    //AABB* _tempLeafBox;
-    //CUDA_SAFE_CALL(cudaMalloc((void**)&_tempLeafBox, number * sizeof(AABB)));
-    CUDA_SAFE_CALL(cudaMemcpy(
-        _tempLeafBox, _leafBoxes + number - 1, number * sizeof(AABB), cudaMemcpyDeviceToDevice));
-
-    _reduct_max_box<<<blockNum, threadNum, sharedMsize>>>(_tempLeafBox, numbers);
-
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
+    if(number <= 0)
     {
-        _reduct_max_box<<<blockNum, threadNum, sharedMsize>>>(_tempLeafBox, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
+        std::cerr << "Cannot reduce an empty BVH." << std::endl;
+        std::abort();
     }
-    cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
+
+    const AABB* leaves = _leafBoxes + number - 1;
+    cudatool::DeviceReduce().Reduce(leaves, _tempLeafBox, number, MergeAABB{}, AABB{});
+    CUDA_SAFE_CALL(cudaMemcpy(
+        _leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice));
     AABB h_bv;
-    cudaMemcpy(&h_bv, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToHost);
-    //CUDA_SAFE_CALL(cudaFree(_tempLeafBox));
+    CUDA_SAFE_CALL(cudaMemcpy(&h_bv, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToHost));
     return h_bv;
 }
 
@@ -1838,7 +1924,7 @@ void calcInternalNodes(Node* _nodes, const uint64_t* _MChash, int number)
 void calcInternalAABB(const Node* _nodes, AABB* _bvs, uint32_t* flags, int number)
 {
     int numbers = number;
-    if(numbers < 1)
+    if(numbers <= 1)
         return;
     const unsigned int threadNum = default_threads;
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
@@ -1858,7 +1944,10 @@ void sortBvs(const uint32_t* _indices, AABB* _bvs, AABB* _temp_bvs, int number)
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
     //AABB* _temp_bvs = _tempLeafBox;
     // CUDA_SAFE_CALL(cudaMalloc((void**)&_temp_bvs, (number) * sizeof(AABB)));
-    cudaMemcpy(_temp_bvs, _bvs + number - 1, sizeof(AABB) * number, cudaMemcpyDeviceToDevice);
+    CUDA_SAFE_CALL(cudaMemcpy(_temp_bvs,
+                              _bvs + number - 1,
+                              sizeof(AABB) * static_cast<size_t>(number),
+                              cudaMemcpyDeviceToDevice));
     _sortBvs<<<blockNum, threadNum>>>(_indices, _bvs + number - 1, _temp_bvs, number);
     //CUDA_SAFE_CALL(cudaFree(_temp_bvs));
 }
@@ -1876,6 +1965,7 @@ void selfQuery_ee(const int*     _bodyID,
                   uint32_t*      _cpNum,
                   int*           MatIndex,
                   double         dHat,
+                  uint32_t       pair_capacity,
                   int            number)
 {
     int numbers = number;
@@ -1896,6 +1986,7 @@ void selfQuery_ee(const int*     _bodyID,
                                            _cpNum,
                                            MatIndex,
                                            dHat,
+                                           pair_capacity,
                                            numbers);
 }
 
@@ -1910,6 +2001,7 @@ void fullCCDselfQuery_ee(const int*     _bodyID,
                          int4*          _ccd_collisonPairs,
                          uint32_t*      _cpNum,
                          double         dHat,
+                         uint32_t       pair_capacity,
                          int            number)
 {
     int numbers = number;
@@ -1919,7 +2011,7 @@ void fullCCDselfQuery_ee(const int*     _bodyID,
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
 
     _selfQuery_ee_ccd<<<blockNum, threadNum>>>(
-        _bodyID, _btype, _vertexes, moveDir, alpha, _edges, _bvs, _nodes, _ccd_collisonPairs, _cpNum, dHat, numbers);
+        _bodyID, _btype, _vertexes, moveDir, alpha, _edges, _bvs, _nodes, _ccd_collisonPairs, _cpNum, dHat, pair_capacity, numbers);
 }
 
 void selfQuery_vf(const int*      _bodyID,
@@ -1934,6 +2026,7 @@ void selfQuery_vf(const int*      _bodyID,
                   uint32_t*       _cpNum,
                   int*            MatIndex,
                   double          dHat,
+                  uint32_t        pair_capacity,
                   int             number)
 {
     int numbers = number;
@@ -1954,6 +2047,7 @@ void selfQuery_vf(const int*      _bodyID,
                                            _cpNum,
                                            MatIndex,
                                            dHat,
+                                           pair_capacity,
                                            numbers);
 }
 
@@ -1969,6 +2063,7 @@ void fullCCDselfQuery_vf(const int*      _bodyID,
                          int4*           _ccd_collisonPairs,
                          uint32_t*       _cpNum,
                          double          dHat,
+                         uint32_t        pair_capacity,
                          int             number)
 {
     int numbers = number;
@@ -1977,30 +2072,66 @@ void fullCCDselfQuery_vf(const int*      _bodyID,
     const unsigned int threadNum = 256;
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
 
-    _selfQuery_vf_ccd<<<blockNum, threadNum>>>(
-        _bodyID, _btype, _vertexes, moveDir, alpha, _faces, _surfVerts, _bvs, _nodes, _ccd_collisonPairs, _cpNum, dHat, numbers);
+    _selfQuery_vf_ccd<<<blockNum, threadNum>>>(_bodyID,
+                                               _btype,
+                                               _vertexes,
+                                               moveDir,
+                                               alpha,
+                                               _faces,
+                                               _surfVerts,
+                                               _bvs,
+                                               _nodes,
+                                               _ccd_collisonPairs,
+                                               _cpNum,
+                                               dHat,
+                                               pair_capacity,
+                                               numbers);
 }
 
 void lbvh::FREE_DEVICE_MEM()
 {
-    CUDA_SAFE_CALL(cudaFree(_indices));
-    CUDA_SAFE_CALL(cudaFree(_MChash));
-    CUDA_SAFE_CALL(cudaFree(_nodes));
-    CUDA_SAFE_CALL(cudaFree(_bvs));
-    CUDA_SAFE_CALL(cudaFree(_flags));
-    CUDA_SAFE_CALL(cudaFree(_tempLeafBox));
+    _indices.release();
+    _MChash.release();
+    _sort_indices.release();
+    _sort_morton_codes.release();
+    _nodes.release();
+    _bvs.release();
+    _flags.release();
+    _tempLeafBox.release();
 }
 
 void lbvh::MALLOC_DEVICE_MEM(const int& number)
 {
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_indices, (number) * sizeof(uint32_t)));
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_MChash, (number) * sizeof(uint64_t)));
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_nodes, (2 * number - 1) * sizeof(Node)));
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_bvs, (2 * number - 1) * sizeof(AABB)));
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_tempLeafBox, number * sizeof(AABB)));
-    CUDA_SAFE_CALL(cudaMalloc((void**)&_flags, (number - 1) * sizeof(uint32_t)));
-    //CUDA_SAFE_CALL(cudaMalloc((void**)&_cpNum, sizeof(uint32_t)));ye
-    //CUDA_SAFE_CALL(cudaMemset(_cpNum, 0, sizeof(uint32_t)));
+    if(number <= 0)
+    {
+        FREE_DEVICE_MEM();
+        return;
+    }
+    _indices.resize(number);
+    _MChash.resize(number);
+    _sort_indices.release();
+    _sort_morton_codes.release();
+    _nodes.resize(2 * static_cast<size_t>(number) - 1);
+    _bvs.resize(2 * static_cast<size_t>(number) - 1);
+    _tempLeafBox.resize(number);
+    _flags.resize(number > 1 ? static_cast<size_t>(number - 1) : 0);
+}
+
+void lbvh::sort_morton_codes(int number)
+{
+    if(number <= 0)
+        return;
+
+    _sort_morton_codes.resize_discard(static_cast<size_t>(number));
+    _sort_indices.resize_discard(static_cast<size_t>(number));
+    LaunchCudaKernal_default(number, 256, 0, fill_bvh_indices_kernel, _indices.data(), number);
+    cudatool::DeviceRadixSort().SortPairs(_MChash.data(),
+                                          _sort_morton_codes.data(),
+                                          _indices.data(),
+                                          _sort_indices.data(),
+                                          number);
+    std::swap(_MChash, _sort_morton_codes);
+    std::swap(_indices, _sort_indices);
 }
 
 lbvh::~lbvh()
@@ -2014,10 +2145,6 @@ void lbvh_f::init(int*       _mbodyID,
                   double3*   _mVerts,
                   uint3*     _mFaces,
                   uint32_t*  _mSurfVert,
-                  int4*      _mCollisonPairs,
-                  int4*      _ccd_mCollisonPairs,
-                  uint32_t*  _mcpNum,
-                  int*       _mMatIndex,
                   const int& faceNum,
                   const int& vertNum)
 {
@@ -2025,10 +2152,6 @@ void lbvh_f::init(int*       _mbodyID,
     _faces             = _mFaces;
     _surfVerts         = _mSurfVert;
     _vertexes          = _mVerts;
-    _collisionPair     = _mCollisonPairs;
-    _ccd_collisionPair = _ccd_mCollisonPairs;
-    _cpNum             = _mcpNum;
-    _MatIndex          = _mMatIndex;
     face_number        = faceNum;
     vert_number        = vertNum;
     _btype             = _mbtype;
@@ -2040,10 +2163,6 @@ void lbvh_e::init(int*       _mbodyID,
                   double3*   _mVerts,
                   double3*   _mRest_vertexes,
                   uint2*     _mEdges,
-                  int4*      _mCollisonPairs,
-                  int4*      _ccd_mCollisonPairs,
-                  uint32_t*  _mcpNum,
-                  int*       _mMatIndex,
                   const int& edgeNum,
                   const int& vertNum)
 {
@@ -2051,10 +2170,6 @@ void lbvh_e::init(int*       _mbodyID,
     _rest_vertexes     = _mRest_vertexes;
     _edges             = _mEdges;
     _vertexes          = _mVerts;
-    _cpNum             = _mcpNum;
-    _collisionPair     = _mCollisonPairs;
-    _ccd_collisionPair = _ccd_mCollisonPairs;
-    _MatIndex          = _mMatIndex;
     edge_number        = edgeNum;
     vert_number        = vertNum;
     _btype             = _mbtype;
@@ -2063,6 +2178,11 @@ void lbvh_e::init(int*       _mbodyID,
 
 AABB* lbvh_f::getSceneSize()
 {
+    if(face_number == 0)
+    {
+        std::cerr << "A collision scene requires at least one surface face." << std::endl;
+        std::abort();
+    }
     calcLeafBvs(_vertexes, _faces, _bvs, face_number, 0);
 
     calcMaxBV(_bvs, _tempLeafBox, face_number);
@@ -2071,15 +2191,16 @@ AABB* lbvh_f::getSceneSize()
 
 double lbvh_f::Construct()
 {
+    if(face_number == 0)
+    {
+        std::cerr << "Cannot construct an empty face BVH." << std::endl;
+        std::abort();
+    }
     calcLeafBvs(_vertexes, _faces, _bvs, face_number, 0);
     //CUDA_SAFE_CALL(cudaDeviceSynchronize());
     scene = calcMaxBV(_bvs, _tempLeafBox, face_number);
     calcMChash(_MChash, _bvs, face_number);
-    thrust::sequence(thrust::device_ptr<uint32_t>(_indices),
-                     thrust::device_ptr<uint32_t>(_indices) + face_number);
-    thrust::sort_by_key(thrust::device_ptr<uint64_t>(_MChash),
-                        thrust::device_ptr<uint64_t>(_MChash) + face_number,
-                        thrust::device_ptr<uint32_t>(_indices));
+    sort_morton_codes(face_number);
     sortBvs(_indices, _bvs, _tempLeafBox, face_number);
     calcLeafNodes(_nodes, _indices, face_number);
     calcInternalNodes(_nodes, _MChash, face_number);
@@ -2090,15 +2211,15 @@ double lbvh_f::Construct()
 
 double lbvh_f::ConstructFullCCD(const double3* moveDir, const double& alpha)
 {
+    if(face_number == 0)
+    {
+        std::cerr << "Cannot construct an empty face BVH." << std::endl;
+        std::abort();
+    }
     calcLeafBvs_fullCCD(_vertexes, moveDir, alpha, _faces, _bvs, face_number, 0);
     scene = calcMaxBV(_bvs, _tempLeafBox, face_number);
     calcMChash(_MChash, _bvs, face_number);
-    thrust::sequence(thrust::device_ptr<uint32_t>(_indices),
-                     thrust::device_ptr<uint32_t>(_indices) + face_number);
-
-    thrust::sort_by_key(thrust::device_ptr<uint64_t>(_MChash),
-                        thrust::device_ptr<uint64_t>(_MChash) + face_number,
-                        thrust::device_ptr<uint32_t>(_indices));
+    sort_morton_codes(face_number);
     sortBvs(_indices, _bvs, _tempLeafBox, face_number);
 
     calcLeafNodes(_nodes, _indices, face_number);
@@ -2111,6 +2232,8 @@ double lbvh_f::ConstructFullCCD(const double3* moveDir, const double& alpha)
 
 double lbvh_e::Construct()
 {
+    if(edge_number == 0)
+        return 0;
 
     /*cudaEvent_t start, end0, end1, end2;
     cudaEventCreate(&start);
@@ -2122,13 +2245,8 @@ double lbvh_e::Construct()
     calcLeafBvs(_vertexes, _edges, _bvs, edge_number, 1);
     scene = calcMaxBV(_bvs, _tempLeafBox, edge_number);
     calcMChash(_MChash, _bvs, edge_number);
-    thrust::sequence(thrust::device_ptr<uint32_t>(_indices),
-                     thrust::device_ptr<uint32_t>(_indices) + edge_number);
+    sort_morton_codes(edge_number);
     //cudaEventRecord(end0);
-
-    thrust::sort_by_key(thrust::device_ptr<uint64_t>(_MChash),
-                        thrust::device_ptr<uint64_t>(_MChash) + edge_number,
-                        thrust::device_ptr<uint32_t>(_indices));
     sortBvs(_indices, _bvs, _tempLeafBox, edge_number);
 
     //cudaEventRecord(end1);
@@ -2156,15 +2274,12 @@ double lbvh_e::Construct()
 
 double lbvh_e::ConstructFullCCD(const double3* moveDir, const double& alpha)
 {
+    if(edge_number == 0)
+        return 0;
     calcLeafBvs_fullCCD(_vertexes, moveDir, alpha, _edges, _bvs, edge_number, 1);
     scene = calcMaxBV(_bvs, _tempLeafBox, edge_number);
     calcMChash(_MChash, _bvs, edge_number);
-    thrust::sequence(thrust::device_ptr<uint32_t>(_indices),
-                     thrust::device_ptr<uint32_t>(_indices) + edge_number);
-
-    thrust::sort_by_key(thrust::device_ptr<uint64_t>(_MChash),
-                        thrust::device_ptr<uint64_t>(_MChash) + edge_number,
-                        thrust::device_ptr<uint32_t>(_indices));
+    sort_morton_codes(edge_number);
     sortBvs(_indices, _bvs, _tempLeafBox, edge_number);
 
     calcLeafNodes(_nodes, _indices, edge_number);
@@ -2177,9 +2292,15 @@ double lbvh_e::ConstructFullCCD(const double3* moveDir, const double& alpha)
 }
 
 
-void lbvh_f::SelfCollitionDetect(double dHat)
+void lbvh_f::SelfCollitionDetect(double    dHat,
+                                 int4*     collision_pairs,
+                                 int4*     ccd_collision_pairs,
+                                 uint32_t* pair_counts,
+                                 int*      matrix_indices,
+                                 uint32_t  pair_capacity)
 {
-
+    if(face_number == 0 || vert_number == 0)
+        return;
     selfQuery_vf(_bodyId,
                  _btype,
                  _vertexes,
@@ -2187,17 +2308,24 @@ void lbvh_f::SelfCollitionDetect(double dHat)
                  _surfVerts,
                  _bvs,
                  _nodes,
-                 _collisionPair,
-                 _ccd_collisionPair,
-                 _cpNum,
-                 _MatIndex,
+                 collision_pairs,
+                 ccd_collision_pairs,
+                 pair_counts,
+                 matrix_indices,
                  dHat,
+                 pair_capacity,
                  vert_number);
 }
 
-void lbvh_e::SelfCollitionDetect(double dHat)
+void lbvh_e::SelfCollitionDetect(double    dHat,
+                                 int4*     collision_pairs,
+                                 int4*     ccd_collision_pairs,
+                                 uint32_t* pair_counts,
+                                 int*      matrix_indices,
+                                 uint32_t  pair_capacity)
 {
-
+    if(edge_number <= 1)
+        return;
     selfQuery_ee(_bodyId,
                  _btype,
                  _vertexes,
@@ -2205,26 +2333,62 @@ void lbvh_e::SelfCollitionDetect(double dHat)
                  _edges,
                  _bvs,
                  _nodes,
-                 _collisionPair,
-                 _ccd_collisionPair,
-                 _cpNum,
-                 _MatIndex,
+                 collision_pairs,
+                 ccd_collision_pairs,
+                 pair_counts,
+                 matrix_indices,
                  dHat,
+                 pair_capacity,
                  edge_number);
 }
 
-void lbvh_f::SelfCollitionFullDetect(double dHat, const double3* moveDir, const double& alpha)
+void lbvh_f::SelfCollitionFullDetect(double         dHat,
+                                     const double3* moveDir,
+                                     const double&  alpha,
+                                     int4*          ccd_collision_pairs,
+                                     uint32_t*      pair_count,
+                                     uint32_t       pair_capacity)
 {
-
-    fullCCDselfQuery_vf(
-        _bodyId, _btype, _vertexes, moveDir, alpha, _faces, _surfVerts, _bvs, _nodes, _ccd_collisionPair, _cpNum, dHat, vert_number);
+    if(face_number == 0 || vert_number == 0)
+        return;
+    fullCCDselfQuery_vf(_bodyId,
+                        _btype,
+                        _vertexes,
+                        moveDir,
+                        alpha,
+                        _faces,
+                        _surfVerts,
+                        _bvs,
+                        _nodes,
+                        ccd_collision_pairs,
+                        pair_count,
+                        dHat,
+                        pair_capacity,
+                        vert_number);
 }
 
-void lbvh_e::SelfCollitionFullDetect(double dHat, const double3* moveDir, const double& alpha)
+void lbvh_e::SelfCollitionFullDetect(double         dHat,
+                                     const double3* moveDir,
+                                     const double&  alpha,
+                                     int4*          ccd_collision_pairs,
+                                     uint32_t*      pair_count,
+                                     uint32_t       pair_capacity)
 {
-
-    fullCCDselfQuery_ee(
-        _bodyId, _btype, _vertexes, moveDir, alpha, _edges, _bvs, _nodes, _ccd_collisionPair, _cpNum, dHat, edge_number);
+    if(edge_number <= 1)
+        return;
+    fullCCDselfQuery_ee(_bodyId,
+                        _btype,
+                        _vertexes,
+                        moveDir,
+                        alpha,
+                        _edges,
+                        _bvs,
+                        _nodes,
+                        ccd_collision_pairs,
+                        pair_count,
+                        dHat,
+                        pair_capacity,
+                        edge_number);
 }
 
 

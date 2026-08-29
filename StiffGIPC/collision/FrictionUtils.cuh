@@ -1,4 +1,4 @@
-﻿//
+//
 // FrictionUtils.cuh
 // GIPC
 //
@@ -8,7 +8,7 @@
 
 #pragma once
 #include <cuda_runtime.h>
-#include "gpu_eigen_libs.cuh"
+#include <math/gpu_eigen_libs.cuh>
 #include "math.h"
 #define SFCLAMPING_ORDER 1
 namespace Friction

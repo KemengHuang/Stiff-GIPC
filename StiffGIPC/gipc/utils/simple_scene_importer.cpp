@@ -2,7 +2,7 @@
 #include <fstream>
 #include <iostream>
 #include <Eigen/Geometry>
-#include <fem_parameters.h>
+#include <fem/fem_parameters.h>
 #include <metis_sort.h>
 
 namespace gipc
