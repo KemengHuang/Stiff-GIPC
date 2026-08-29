@@ -1770,6 +1770,21 @@ void MASPreconditioner::PrefixSumLx(int level)
     if(number < 1)
         return;
     int levelBegin = h_clevelSize.y;
+    if(levelBegin < 0)
+    {
+        std::cerr << "Negative MAS hierarchy offset: " << levelBegin << std::endl;
+        std::abort();
+    }
+    const size_t hierarchy_begin = static_cast<size_t>(levelBegin);
+    const size_t hierarchy_count = static_cast<size_t>(number);
+    if(hierarchy_begin > d_goingNext.size()
+       || hierarchy_count > d_goingNext.size() - hierarchy_begin)
+    {
+        std::cerr << "MAS hierarchy write exceeds d_goingNext: begin="
+                  << levelBegin << ", count=" << number
+                  << ", capacity=" << d_goingNext.size() << std::endl;
+        std::abort();
+    }
     int blockSize  = BANKSIZE * BANKSIZE;
     int numBlocks  = (number + blockSize - 1) / blockSize;
 
@@ -1877,6 +1892,15 @@ int MASPreconditioner::ReorderRealtime(int cpNum, const int4* collisionPairs)
     CUDA_SAFE_CALL(cudaMemcpy(&h_clevelSize, d_levelSize + levelnum, sizeof(int2), cudaMemcpyDeviceToHost));
 
     totalNumberClusters = h_clevelSize.y;
+
+    if(totalNumberClusters < 0
+       || static_cast<size_t>(totalNumberClusters) > d_goingNext.size())
+    {
+        std::cerr << "MAS hierarchy size exceeds d_goingNext: clusters="
+                  << totalNumberClusters
+                  << ", capacity=" << d_goingNext.size() << std::endl;
+        std::abort();
+    }
 
     AggregationKernel();
 
@@ -2397,12 +2421,16 @@ void MASPreconditioner::initPreconditioner_Neighbor(int vertNum,
     totalNodes            = vertNum;
     const size_t vertex_count = static_cast<size_t>(vertNum);
     const size_t level_count  = static_cast<size_t>(levelnum);
+    const size_t mapped_node_count = static_cast<size_t>(partMapSize);
     d_denseLevel.resize(vertex_count);
     d_real_map_partId.resize(vertex_count);
     d_coarseTable.resize(vertex_count);
     d_coarseSpaceTables.resize(vertex_count * level_count);
     d_levelSize.resize(level_count + 1);
-    d_goingNext.resize(vertex_count * level_count);
+    // Hierarchy IDs use cumulative BANKSIZE-aligned offsets. In GROUP mode
+    // their base domain is partMapSize, which may exceed the real vertex count.
+    d_goingNext.resize(requiredGoingNextCapacity(
+        vertex_count, mapped_node_count, level_count));
     d_prefixOriginal.resize(vertex_count);
     d_nextPrefix.resize(vertex_count);
     d_nextPrefixSum.resize(vertex_count);

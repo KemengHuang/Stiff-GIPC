@@ -11,6 +11,11 @@
 #include <cuda_tools/cuda_all.h>
 #include "linear_system/linear_system/global_matrix.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdlib>
+#include <limits>
+
 class MASPreconditioner
 {
 
@@ -53,6 +58,24 @@ class MASPreconditioner
     cudatool::DeviceBuffer<int>          d_real_map_partId;
 
   public:
+    static std::size_t requiredGoingNextCapacity(std::size_t vertex_count,
+                                                 std::size_t mapped_node_count,
+                                                 std::size_t level_count)
+    {
+        const std::size_t base_count = std::max(vertex_count, mapped_node_count);
+        if(base_count == 0 || level_count == 0)
+            return 0;
+        constexpr std::size_t bank_size = BANKSIZE;
+        if(base_count
+           > std::numeric_limits<std::size_t>::max() - (bank_size - 1))
+            std::abort();
+        const std::size_t padded_count =
+            (base_count + bank_size - 1) / bank_size * bank_size;
+        if(padded_count > std::numeric_limits<std::size_t>::max() / level_count)
+            std::abort();
+        return padded_count * level_count;
+    }
+
     void initPreconditioner_Neighbor(int vertNum,
                                      int mCollision_node_offset,
                                      int totalNeighborNum,

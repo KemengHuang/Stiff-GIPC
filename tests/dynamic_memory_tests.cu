@@ -1,6 +1,7 @@
 #include <cuda_tools/cuda_all.h>
 #include <gipc/utils/parallel_algorithm/fast_segmental_reduce.h>
 #include <linear_system/linear_system/global_matrix.h>
+#include <solver/MASPreconditioner.cuh>
 
 #include <algorithm>
 #include <cstdio>
@@ -299,6 +300,25 @@ void test_partial_warp_segmental_reduce()
             "partial-warp segmented reduction lost or added tail values");
 }
 
+void test_mas_going_next_capacity()
+{
+    constexpr size_t vertex_count = 38'386;
+    constexpr size_t level_count  = 4;
+    const size_t required = MASPreconditioner::requiredGoingNextCapacity(
+        vertex_count, vertex_count, level_count);
+    require(required == 38'400 * level_count,
+            "MAS hierarchy capacity did not include per-level bank alignment");
+    require(required > vertex_count * level_count,
+            "MAS regression case no longer exercises the old undersized formula");
+
+    const size_t grouped = MASPreconditioner::requiredGoingNextCapacity(
+        1'001, 1'024, 6);
+    require(grouped == 1'024 * 6,
+            "MAS GROUP capacity did not use the mapped-node domain");
+    require(MASPreconditioner::requiredGoingNextCapacity(0, 0, 6) == 0,
+            "empty MAS hierarchy must require zero storage");
+}
+
 void test_zero_capacity_count_grow_rerun()
 {
     constexpr int first_count = 137;
@@ -455,6 +475,7 @@ int main()
     test_preallocated_triplet_workspace();
     test_contact_partition_boundaries();
     test_partial_warp_segmental_reduce();
+    test_mas_going_next_capacity();
     test_zero_capacity_count_grow_rerun();
     test_persistent_cub_workspace();
     checkCudaErrors(cudaDeviceSynchronize());
