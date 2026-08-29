@@ -13,7 +13,7 @@ if(UNIX)
 endif()
 
 project(StiffGIPC LANGUAGES CXX CUDA)
-include(CTest)
+#include(CTest)
 
 # generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
