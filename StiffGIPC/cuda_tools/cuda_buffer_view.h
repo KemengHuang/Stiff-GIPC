@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <cinttypes>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -316,9 +317,10 @@ using CVarView = VarViewT<true, T>;
 // from std::vector semantics:
 //   - resize(n)  : vector-like resize; preserves the old logical range when
 //                  a reallocation is required.
-//   - resize_discard(n): resize plus geometric growth for regenerated output.
-//   - resize_preserve(n): geometric growth, preserving the current logical
-//                         range and updating size to n.
+//   - resize_discard(n): resize regenerated output with 50% headroom based on
+//                        the latest requirement.
+//   - resize_preserve(n): the same required-based growth while preserving the
+//                         current logical range and updating size to n.
 //   - reserve(c) : grows capacity while preserving the current contents.
 //   - clear()    : sets size to 0, keeps the allocation.
 // Ownership is move-only. Use copy_from() when a device-to-device value copy
@@ -336,15 +338,16 @@ class DeviceBuffer
         if(required <= current)
             return current;
 
-        size_t growth = current / 2;
+        size_t growth = required / 2;
         if(growth == 0)
             growth = 1;
-
-        size_t grown = current;
-        if(current <= std::numeric_limits<size_t>::max() - growth)
-            grown = current + growth;
-
-        return std::max(required, grown);
+        if(required > std::numeric_limits<size_t>::max() - growth)
+        {
+            std::cerr << "DeviceBuffer redundant-capacity overflow: required="
+                      << required << std::endl;
+            std::abort();
+        }
+        return required + growth;
     }
 
     static T* allocate_device(size_t count)
@@ -447,8 +450,8 @@ class DeviceBuffer
         m_size = new_size;
     }
 
-    // Grow geometrically and discard old contents when reallocation is
-    // required. Use this for outputs that will be fully regenerated.
+    // Grow to 150% of the latest requirement and discard old contents. Use
+    // this for outputs that will be fully regenerated.
     void resize_discard(size_t new_size)
     {
         if(new_size > m_capacity)
@@ -456,8 +459,8 @@ class DeviceBuffer
         m_size = new_size;
     }
 
-    // Grow geometrically while preserving every element in the current
-    // logical range, then update that range to new_size.
+    // Grow to 150% of the latest requirement while preserving every element
+    // in the current logical range, then update that range to new_size.
     void resize_preserve(size_t new_size)
     {
         if(new_size > m_capacity)
@@ -477,8 +480,8 @@ class DeviceBuffer
             realloc_preserve(new_capacity);
     }
 
-    // Reserve at least n elements with geometric growth. Like reserve(), this
-    // never changes the logical size.
+    // Reserve 50% beyond n when growth is needed. Like reserve(), this never
+    // changes the logical size.
     void reserve_amortized(size_t n)
     {
         if(n > m_capacity)

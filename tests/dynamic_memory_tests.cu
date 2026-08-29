@@ -96,6 +96,39 @@ void test_device_buffer_preserve()
         require(host[i] == 20 + i, "second preserve growth lost extended data");
 }
 
+void test_required_based_redundant_growth()
+{
+    cudatool::DeviceBuffer<int> values;
+    values.resize_discard(100);
+    require(values.capacity() >= 150,
+            "initial dynamic growth did not reserve 50% above the requirement");
+
+    values.resize_discard(1'000);  // deliberately jumps far beyond old capacity
+    require(values.capacity() >= 1'500,
+            "large dynamic jump used the exact requirement without headroom");
+    int* const allocation = values.data();
+    const size_t retained_capacity = values.capacity();
+
+    values.resize_discard(1'001);
+    require(values.data() == allocation && values.capacity() == retained_capacity,
+            "small follow-up growth reallocated despite required-based headroom");
+    values.resize_discard(10);
+    require(values.capacity() == retained_capacity,
+            "logical shrink unexpectedly released redundant capacity");
+
+    cudatool::DeviceBuffer<int> preserved;
+    preserved.resize(4);
+    fill_sequence<<<1, 32>>>(preserved.data(), 4, 90);
+    preserved.resize_preserve(1'000);
+    require(preserved.capacity() >= 1'500,
+            "preserving growth did not reserve against the new requirement");
+    std::vector<int> host;
+    preserved.copy_to(host);
+    for(int i = 0; i < 4; ++i)
+        require(host[i] == 90 + i,
+                "required-based preserving growth lost existing values");
+}
+
 void test_launcher_does_not_copy_owning_buffers()
 {
     cudatool::DeviceBuffer<int> value(1);
@@ -469,6 +502,7 @@ int main()
 {
     checkCudaErrors(cudaSetDevice(0));
     test_device_buffer_preserve();
+    test_required_based_redundant_growth();
     test_launcher_does_not_copy_owning_buffers();
     test_triplet_workspace_preserve();
     test_zero_collision_conversion_workspace();

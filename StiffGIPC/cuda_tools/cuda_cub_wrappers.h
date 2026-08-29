@@ -10,6 +10,8 @@
 #include "cuda_def.h"
 #include "cuda_debug.h"
 #include <algorithm>
+#include <cstdlib>
+#include <iostream>
 #include <limits>
 
 namespace cudatool
@@ -38,13 +40,16 @@ namespace details
             if(bytes <= m_capacity)
                 return m_ptr;
 
-            size_t growth = m_capacity / 2;
+            size_t growth = bytes / 2;
             if(growth == 0)
                 growth = 1;
-            size_t grown = m_capacity;
-            if(m_capacity <= std::numeric_limits<size_t>::max() - growth)
-                grown = m_capacity + growth;
-            size_t new_capacity = std::max(bytes, grown);
+            if(bytes > std::numeric_limits<size_t>::max() - growth)
+            {
+                std::cerr << "CUB redundant workspace overflow: required="
+                          << bytes << std::endl;
+                std::abort();
+            }
+            size_t new_capacity = bytes + growth;
 
             // CUB calls in this wrapper use the calling thread's default
             // stream. cudaFree drains prior work before the workspace moves.
