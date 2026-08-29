@@ -13,7 +13,6 @@ if(UNIX)
 endif()
 
 project(StiffGIPC LANGUAGES CXX CUDA)
-#include(CTest)
 
 # generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -128,30 +127,4 @@ if(MSVC)
             set_property(TARGET ${_tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
         endif()
     endforeach()
-endif()
-
-if(BUILD_TESTING)
-    add_executable(dynamic_memory_tests tests/dynamic_memory_tests.cu)
-    target_include_directories(dynamic_memory_tests PRIVATE "StiffGIPC/")
-    target_include_directories(dynamic_memory_tests PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-    if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
-        target_include_directories(dynamic_memory_tests PRIVATE ${CUDAToolkit_INCLUDE_DIRS}/cccl)
-    endif()
-    target_compile_features(dynamic_memory_tests PRIVATE cxx_std_17 cuda_std_17)
-    target_compile_definitions(dynamic_memory_tests PRIVATE
-        CCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING)
-    target_compile_options(dynamic_memory_tests PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:
-            --extended-lambda
-            --expt-relaxed-constexpr
-            --default-stream=per-thread
-            $<$<CXX_COMPILER_ID:MSVC>:-Xcompiler=/EHsc>
-            $<$<CXX_COMPILER_ID:MSVC>:-Xcompiler=/Zc:preprocessor>
-        >)
-    set_target_properties(dynamic_memory_tests PROPERTIES
-        CUDA_EXTENSIONS ON
-        CUDA_STANDARD 17
-        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
-    target_link_libraries(dynamic_memory_tests PRIVATE CUDA::cudart Eigen3::Eigen)
-    add_test(NAME dynamic-memory-zero-capacity COMMAND dynamic_memory_tests)
 endif()

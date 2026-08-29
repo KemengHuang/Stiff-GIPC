@@ -32,25 +32,50 @@ namespace
 {
 struct MaxDouble
 {
-    __device__ double operator()(double lhs, double rhs) const { return lhs > rhs ? lhs : rhs; }
+    __host__ __device__ double operator()(double lhs, double rhs) const
+    {
+        return lhs > rhs ? lhs : rhs;
+    }
 };
 
 struct MaxDouble2
 {
-    __device__ double2 operator()(const double2& lhs, const double2& rhs) const
+    __host__ __device__ double2 operator()(const double2& lhs, const double2& rhs) const
     {
         return make_double2(lhs.x > rhs.x ? lhs.x : rhs.x,
                             lhs.y > rhs.y ? lhs.y : rhs.y);
     }
 };
+
+double reduce_sum_to_host(const double* input, int count, double* output)
+{
+    cudatool::DeviceReduce().Sum(input, output, count);
+    double result = 0.0;
+    CUDA_SAFE_CALL(cudaMemcpy(&result, output, sizeof(result), cudaMemcpyDeviceToHost));
+    return result;
+}
+
+double reduce_max_to_host(const double* input, int count, double* output)
+{
+    cudatool::DeviceReduce().Max(input, output, count);
+    double result = 0.0;
+    CUDA_SAFE_CALL(cudaMemcpy(&result, output, sizeof(result), cudaMemcpyDeviceToHost));
+    return result;
+}
+
+double2 reduce_component_max_to_host(const double2* input, int count, double2* output)
+{
+    cudatool::DeviceReduce().Reduce(
+        input, output, count, MaxDouble2{}, make_double2(0.0, 0.0));
+    double2 result = make_double2(0.0, 0.0);
+    CUDA_SAFE_CALL(cudaMemcpy(&result, output, sizeof(result), cudaMemcpyDeviceToHost));
+    return result;
+}
 }  // namespace
 
 __global__ void _cub_reduct_max_double3_to_double(const double3* input,
                                                   double*        output,
                                                   int            number);
-__global__ void _cub_reduct_max_double(double* values, int number);
-__global__ void _cub_sum_double(double* values, int number);
-__global__ void _cub_reduct_max_double2(double2* values, int number);
 __global__ void _cub_reduct_MGroundDist(const double3* vertexes,
                                         const double*  ground_offset,
                                         const double3* ground_normal,
@@ -538,245 +563,6 @@ __global__ void _calcVertMChash(uint64_t* _MChash, const double3* _vertexes, con
     _MChash[idx] = mc64;
 }
 
-__global__ void _reduct_max_double3_to_double(const double3* _double3Dim, double* _double1Dim, int number)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-
-    extern __shared__ double tep[];
-
-    if(idx >= number)
-        return;
-    //int cfid = tid + CONFLICT_FREE_OFFSET(tid);
-    double3 tempMove = _double3Dim[idx];
-
-    double temp =
-        std::fmax(std::fmax(std::fabs(tempMove.x), std::fabs(tempMove.y)), std::fabs(tempMove.z));
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    double nextTp;
-    int    warpNum;
-    //int tidNum = 32;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        //tidNum = numbers - idof;
-        warpNum = ((number - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        double tempMin = __shfl_down_sync(0xffffffff, temp, i);
-        temp           = std::max(temp, tempMin);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        //	tidNum = warpNum;
-        temp = tep[threadIdx.x];
-
-        //	warpNum = ((tidNum + 31) >> 5);
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            double tempMin = __shfl_down_sync(0xffffffff, temp, i);
-            temp           = std::max(temp, tempMin);
-        }
-    }
-    if(threadIdx.x == 0)
-    {
-        _double1Dim[blockIdx.x] = temp;
-    }
-}
-
-__global__ void _reduct_min_double(double* _double1Dim, int number)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-
-    extern __shared__ double tep[];
-
-    if(idx >= number)
-        return;
-    //int cfid = tid + CONFLICT_FREE_OFFSET(tid);
-    double temp = _double1Dim[idx];
-
-    __threadfence();
-
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    double nextTp;
-    int    warpNum;
-    //int tidNum = 32;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        //tidNum = numbers - idof;
-        warpNum = ((number - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        double tempMin = __shfl_down_sync(0xffffffff, temp, i);
-        temp           = std::min(temp, tempMin);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        //	tidNum = warpNum;
-        temp = tep[threadIdx.x];
-
-        //	warpNum = ((tidNum + 31) >> 5);
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            double tempMin = __shfl_down_sync(0xffffffff, temp, i);
-            temp           = std::min(temp, tempMin);
-        }
-    }
-    if(threadIdx.x == 0)
-    {
-        _double1Dim[blockIdx.x] = temp;
-    }
-}
-
-__global__ void _reduct_M_double2(double2* _double2Dim, int number)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-
-    extern __shared__ double2 sdata[];
-
-    if(idx >= number)
-        return;
-    //int cfid = tid + CONFLICT_FREE_OFFSET(tid);
-    double2 temp = _double2Dim[idx];
-
-    __threadfence();
-
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    double nextTp;
-    int    warpNum;
-    //int tidNum = 32;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        //tidNum = numbers - idof;
-        warpNum = ((number - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        double tempMin = __shfl_down_sync(0xffffffff, temp.x, i);
-        double tempMax = __shfl_down_sync(0xffffffff, temp.y, i);
-        temp.x         = std::max(temp.x, tempMin);
-        temp.y         = std::max(temp.y, tempMax);
-    }
-    if(warpTid == 0)
-    {
-        sdata[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        //	tidNum = warpNum;
-        temp = sdata[threadIdx.x];
-
-        //	warpNum = ((tidNum + 31) >> 5);
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            double tempMin = __shfl_down_sync(0xffffffff, temp.x, i);
-            double tempMax = __shfl_down_sync(0xffffffff, temp.y, i);
-            temp.x         = std::max(temp.x, tempMin);
-            temp.y         = std::max(temp.y, tempMax);
-        }
-    }
-    if(threadIdx.x == 0)
-    {
-        _double2Dim[blockIdx.x] = temp;
-    }
-}
-
-__global__ void _reduct_max_double(double* _double1Dim, int number)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-
-    extern __shared__ double tep[];
-
-    if(idx >= number)
-        return;
-    //int cfid = tid + CONFLICT_FREE_OFFSET(tid);
-    double temp = _double1Dim[idx];
-
-    __threadfence();
-
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    double nextTp;
-    int    warpNum;
-    //int tidNum = 32;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        //tidNum = numbers - idof;
-        warpNum = ((number - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        double tempMax = __shfl_down_sync(0xffffffff, temp, i);
-        temp           = std::max(temp, tempMax);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        //	tidNum = warpNum;
-        temp = tep[threadIdx.x];
-
-        //	warpNum = ((tidNum + 31) >> 5);
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            double tempMax = __shfl_down_sync(0xffffffff, temp, i);
-            temp           = std::max(temp, tempMax);
-        }
-    }
-    if(threadIdx.x == 0)
-    {
-        _double1Dim[blockIdx.x] = temp;
-    }
-}
 
 __device__ double __cal_Barrier_energy(const double3* _vertexes,
                                        const double3* _rest_vertexes,
@@ -8030,61 +7816,6 @@ __global__ void _getDeltaEnergy_Reduction(double* squeue, const double3* b, cons
     }
 }
 
-__global__ void __add_reduction(double* mem, int numbers)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-
-    extern __shared__ double tep[];
-
-    if(idx >= numbers)
-        return;
-    //int cfid = tid + CONFLICT_FREE_OFFSET(tid);
-    double temp = mem[idx];
-
-    __threadfence();
-
-    int    warpTid = threadIdx.x % 32;
-    int    warpId  = (threadIdx.x >> 5);
-    double nextTp;
-    int    warpNum;
-    //int tidNum = 32;
-    if(blockIdx.x == gridDim.x - 1)
-    {
-        //tidNum = numbers - idof;
-        warpNum = ((numbers - idof + 31) >> 5);
-    }
-    else
-    {
-        warpNum = ((blockDim.x) >> 5);
-    }
-    for(int i = 1; i < 32; i = (i << 1))
-    {
-        temp += __shfl_down_sync(0xffffffff, temp, i);
-    }
-    if(warpTid == 0)
-    {
-        tep[warpId] = temp;
-    }
-    __syncthreads();
-    if(threadIdx.x >= warpNum)
-        return;
-    if(warpNum > 1)
-    {
-        //	tidNum = warpNum;
-        temp = tep[threadIdx.x];
-        //	warpNum = ((tidNum + 31) >> 5);
-        for(int i = 1; i < warpNum; i = (i << 1))
-        {
-            temp += __shfl_down_sync(0xffffffff, temp, i);
-        }
-    }
-    if(threadIdx.x == 0)
-    {
-        mem[blockIdx.x] = temp;
-    }
-}
-
 __global__ void _stepForward(double3* _vertexes,
                              double3* _vertexesTemp,
                              double3* _moveDir,
@@ -8979,19 +8710,8 @@ double2 GIPC::minMaxGroundDist()
         _vertexes, _groundOffset, _groundNormal, _environment_collisionPair, queue, numbers);
     //_reduct_min_double3_to_double << <blockNum, threadNum, sharedMsize >> > (_moveDir, _tempMinMovement, numbers);
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double2<<<blockNum, threadNum>>>(queue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double2 minMaxValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minMaxValue, queue, sizeof(double2), cudaMemcpyDeviceToHost));
+    double2 minMaxValue = reduce_component_max_to_host(
+        queue, blockNum, pcg_data.prepare_reduction_pair());
     minMaxValue.x = 1.0 / minMaxValue.x;
     return minMaxValue;
 }
@@ -9044,19 +8764,8 @@ double GIPC::self_largestFeasibleStepSize(double slackness, int numbers)
         _vertexes, _ccd_collisonPairs, _moveDir, mqueue, slackness, numbers);
     //_reduct_min_double3_to_double << <blockNum, threadNum, sharedMsize >> > (_moveDir, _tempMinMovement, numbers);
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double<<<blockNum, threadNum>>>(mqueue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, mqueue, sizeof(double), cudaMemcpyDeviceToHost));
+    const double minValue =
+        reduce_max_to_host(mqueue, blockNum, pcg_data.prepare_reduction_scalar());
     //printf("                 full ccd time step:  %f\n", 1.0 / minValue);
     //CUDA_SAFE_CALL(cudaFree(_minSteps));
     return 1.0 / minValue;
@@ -9065,6 +8774,8 @@ double GIPC::self_largestFeasibleStepSize(double slackness, int numbers)
 double GIPC::cfl_largestSpeed()
 {
     int                numbers   = surf_vertexNum;
+    if(numbers < 1)
+        return 0.0;
     const unsigned int threadNum = default_threads;
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
     double* mqueue = pcg_data.prepare_reduction_queue(numbers, threadNum);
@@ -9077,26 +8788,22 @@ double GIPC::cfl_largestSpeed()
         _moveDir, mqueue, _surfVerts, numbers);
     //_reduct_min_double3_to_double << <blockNum, threadNum, sharedMsize >> > (_moveDir, _tempMinMovement, numbers);
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double<<<blockNum, threadNum>>>(mqueue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, mqueue, sizeof(double), cudaMemcpyDeviceToHost));
+    const double minValue =
+        reduce_max_to_host(mqueue, blockNum, pcg_data.prepare_reduction_scalar());
     //CUDA_SAFE_CALL(cudaFree(_maxV));
     return minValue;
 }
 
-double reduction2Kappa(int type, const double3* A, const double3* B, double* _queue, int vertexNum)
+double reduction2Kappa(int            type,
+                       const double3* A,
+                       const double3* B,
+                       double*        queue,
+                       double*        reduction_output,
+                       int            vertexNum)
 {
     int                numbers   = vertexNum;
+    if(numbers < 1)
+        return 0.0;
     const unsigned int threadNum = default_threads;
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
 
@@ -9106,29 +8813,15 @@ double reduction2Kappa(int type, const double3* A, const double3* B, double* _qu
     if(type == 0)
     {
         //CUDA_SAFE_CALL(cudaMemcpy(_tempMinMovement, _moveDir, number * sizeof(AABB), cudaMemcpyDeviceToDevice));
-        _cub_reduct_dot<<<blockNum, threadNum>>>(A, B, _queue, numbers);
+        _cub_reduct_dot<<<blockNum, threadNum>>>(A, B, queue, numbers);
     }
     else if(type == 1)
     {
-        _cub_reduct_squared_norm<<<blockNum, threadNum>>>(A, _queue, numbers);
+        _cub_reduct_squared_norm<<<blockNum, threadNum>>>(A, queue, numbers);
     }
     //_reduct_min_double3_to_double << <blockNum, threadNum, sharedMsize >> > (_moveDir, _tempMinMovement, numbers);
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_sum_double<<<blockNum, threadNum>>>(_queue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double dotValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&dotValue, _queue, sizeof(double), cudaMemcpyDeviceToHost));
-    //CUDA_SAFE_CALL(cudaFree(_queue));
-    return dotValue;
+    return reduce_sum_to_host(queue, blockNum, reduction_output);
 }
 
 double GIPC::ground_largestFeasibleStepSize(double slackness)
@@ -9157,19 +8850,8 @@ double GIPC::ground_largestFeasibleStepSize(double slackness)
         _vertexes, _surfVerts, _groundOffset, _groundNormal, _moveDir, mqueue, slackness, numbers);
 
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double<<<blockNum, threadNum>>>(mqueue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, mqueue, sizeof(double), cudaMemcpyDeviceToHost));
+    const double minValue =
+        reduce_max_to_host(mqueue, blockNum, pcg_data.prepare_reduction_scalar());
     //CUDA_SAFE_CALL(cudaFree(_minSteps));
     return 1.0 / minValue;
 }
@@ -9189,19 +8871,8 @@ double GIPC::InjectiveStepSize(double slackness, double errorRate, uint4* tets)
         _vertexes, tets, _moveDir, mqueue, slackness, errorRate, numbers);
 
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double<<<blockNum, threadNum>>>(mqueue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, mqueue, sizeof(double), cudaMemcpyDeviceToHost));
+    const double minValue =
+        reduce_max_to_host(mqueue, blockNum, pcg_data.prepare_reduction_scalar());
     //printf("Injective Time step:   %f\n", 1.0 / minValue);
     //if (1.0 / minValue < 1) {
     //    system("pause");
@@ -9478,19 +9149,8 @@ double2 GIPC::minMaxSelfDist()
         _vertexes, _collisonPairs, queue, numbers);
     //_reduct_min_double3_to_double << <blockNum, threadNum, sharedMsize >> > (_moveDir, _tempMinMovement, numbers);
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double2<<<blockNum, threadNum>>>(queue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double2 minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, queue, sizeof(double2), cudaMemcpyDeviceToHost));
+    double2 minValue = reduce_component_max_to_host(
+        queue, blockNum, pcg_data.prepare_reduction_pair());
     minValue.x = 1.0 / minValue.x;
     return minValue;
 }
@@ -9797,7 +9457,10 @@ void calculate_triangle_fem_gradient(__GEIGEN__::Matrix2x2d* triDmInverses,
         triDmInverses, vertexes, triangles, area, gradient, triangleNum, stretchStiff, shearStiff, IPC_dt, strainRate);
 }
 
-double calcMinMovement(const double3* _moveDir, double* _queue, const int& number)
+double calcMinMovement(const double3* move_dir,
+                       double*        queue,
+                       double*        reduction_output,
+                       const int&     number)
 {
 
     int numbers = number;
@@ -9811,24 +9474,10 @@ double calcMinMovement(const double3* _moveDir, double* _queue, const int& numbe
     CUDA_SAFE_CALL(cudaMalloc((void**)&_tempMinMovement, numbers * sizeof(double)));*/
     //CUDA_SAFE_CALL(cudaMemcpy(_tempMinMovement, _moveDir, number * sizeof(AABB), cudaMemcpyDeviceToDevice));
 
-    _cub_reduct_max_double3_to_double<<<blockNum, threadNum>>>(_moveDir, _queue, numbers);
+    _cub_reduct_max_double3_to_double<<<blockNum, threadNum>>>(move_dir, queue, numbers);
     //CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        //_reduct_max_box << <blockNum, threadNum, sharedMsize >> > (_tempLeafBox, numbers);
-        _cub_reduct_max_double<<<blockNum, threadNum>>>(_queue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    //cudaMemcpy(_leafBoxes, _tempLeafBox, sizeof(AABB), cudaMemcpyDeviceToDevice);
-    double minValue;
-    CUDA_SAFE_CALL(cudaMemcpy(&minValue, _queue, sizeof(double), cudaMemcpyDeviceToHost));
-    //CUDA_SAFE_CALL(cudaFree(_tempMinMovement));
-    return minValue;
+    return reduce_max_to_host(queue, blockNum, reduction_output);
 }
 
 void stepForward(double3* _vertexes,
@@ -10122,8 +9771,11 @@ void GIPC::initKappa(device_TetraData& TetMesh)
         calBarrierGradient(_gc, 1);
         double* reduction_queue =
             pcg_data.prepare_reduction_queue(vertexNum, default_threads);
-        double gsum = reduction2Kappa(0, _gc, _GE, reduction_queue, vertexNum);
-        double gsnorm = reduction2Kappa(1, _gc, _GE, reduction_queue, vertexNum);
+        double* reduction_output = pcg_data.prepare_reduction_scalar();
+        double  gsum =
+            reduction2Kappa(0, _gc, _GE, reduction_queue, reduction_output, vertexNum);
+        double gsnorm =
+            reduction2Kappa(1, _gc, _GE, reduction_queue, reduction_output, vertexNum);
         //CUDA_SAFE_CALL(cudaFree(_gc));
         //CUDA_SAFE_CALL(cudaFree(_GE));
         double minKappa = -gsum / gsnorm;
@@ -10273,49 +9925,6 @@ __global__ void _cub_reduct_max_double3_to_double(const double3* input,
     value = BlockReduce(storage).Reduce(value, MaxDouble{}, valid_items);
     if(threadIdx.x == 0)
         output[blockIdx.x] = value;
-}
-
-__global__ void _cub_reduct_max_double(double* values, int number)
-{
-    int block_begin = blockIdx.x * blockDim.x;
-    int idx         = block_begin + threadIdx.x;
-    int remaining   = number - block_begin;
-    int valid_items = remaining < static_cast<int>(blockDim.x) ? remaining
-                                                                : static_cast<int>(blockDim.x);
-    double value = idx < number ? values[idx] : 0.0;
-
-    using BlockReduce = cub::BlockReduce<double, default_threads>;
-    __shared__ typename BlockReduce::TempStorage storage;
-    value = BlockReduce(storage).Reduce(value, MaxDouble{}, valid_items);
-    if(threadIdx.x == 0)
-        values[blockIdx.x] = value;
-}
-
-__global__ void _cub_sum_double(double* values, int number)
-{
-    int block_begin = blockIdx.x * blockDim.x;
-    int idx         = block_begin + threadIdx.x;
-    int remaining   = number - block_begin;
-    int valid_items = remaining < static_cast<int>(blockDim.x) ? remaining
-                                                                : static_cast<int>(blockDim.x);
-    double value = idx < number ? values[idx] : 0.0;
-    GIPC_CUB_BLOCK_SUM_AND_STORE(value, valid_items, values[blockIdx.x]);
-}
-
-__global__ void _cub_reduct_max_double2(double2* values, int number)
-{
-    int block_begin = blockIdx.x * blockDim.x;
-    int idx         = block_begin + threadIdx.x;
-    int remaining   = number - block_begin;
-    int valid_items = remaining < static_cast<int>(blockDim.x) ? remaining
-                                                                : static_cast<int>(blockDim.x);
-    double2 value = idx < number ? values[idx] : make_double2(0.0, 0.0);
-
-    using BlockReduce = cub::BlockReduce<double2, default_threads>;
-    __shared__ typename BlockReduce::TempStorage storage;
-    value = BlockReduce(storage).Reduce(value, MaxDouble2{}, valid_items);
-    if(threadIdx.x == 0)
-        values[blockIdx.x] = value;
 }
 
 __global__ void _cub_reduct_MGroundDist(const double3* vertexes,
@@ -11022,19 +10631,7 @@ double GIPC::Energy_Add_Reduction_Algorithm(int type, device_TetraData& TetMesh)
             break;
     }
     //CUDA_SAFE_CALL(cudaDeviceSynchronize());
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        _cub_sum_double<<<blockNum, threadNum>>>(queue, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    double result;
-    CUDA_SAFE_CALL(cudaMemcpy(&result, queue, sizeof(double), cudaMemcpyDeviceToHost));
-    //CUDA_SAFE_CALL(cudaFree(queue));
-    return result;
+    return reduce_sum_to_host(queue, blockNum, pcg_data.prepare_reduction_scalar());
 }
 
 
@@ -11393,7 +10990,10 @@ int              GIPC::solve_subIP(device_TetraData& TetMesh,
 
         double* movement_queue =
             pcg_data.prepare_reduction_queue(vertexNum, default_threads);
-        double distToOpt_PN = calcMinMovement(_moveDir, movement_queue, vertexNum);
+        double distToOpt_PN = calcMinMovement(_moveDir,
+                                              movement_queue,
+                                              pcg_data.prepare_reduction_scalar(),
+                                              vertexNum);
 
         bool gradVanish = (distToOpt_PN < sqrt(Newton_solver_threshold * Newton_solver_threshold
                                                * bboxDiagSize2 * IPC_dt * IPC_dt));

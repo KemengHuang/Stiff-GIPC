@@ -17,6 +17,8 @@ class PCG_Data
 {
   public:
     cudatool::DeviceBuffer<double>  squeue;
+    cudatool::DeviceBuffer<double>  reduction_scalar;
+    cudatool::DeviceBuffer<double2> reduction_pair;
     cudatool::DeviceBuffer<double3> dx;
     MASPreconditioner               MP;
 
@@ -25,6 +27,8 @@ class PCG_Data
   public:
     void    Malloc_DEVICE_MEM(const int& vertex_num, const int& tetradedra_num);
     double* prepare_reduction_queue(size_t item_count, size_t block_size = 256);
+    double* prepare_reduction_scalar();
+    double2* prepare_reduction_pair();
     void    FREE_DEVICE_MEM();
 };
 #endif  // ! _PCG_SOLVER_CUH_

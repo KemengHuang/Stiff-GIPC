@@ -2,6 +2,7 @@
 #include <gipc/utils/timer.h>
 #include <gipc/statistics.h>
 #include <cuda_tools/cuda_tools.h>
+#include <cuda_tools/cuda_cub_wrappers.h>
 #include <cub/block/block_reduce.cuh>
 
 
@@ -18,22 +19,6 @@ __global__ void PCG_vdv_Reduction(double* squeue, const double* a, const double*
     temp = BlockReduce(storage).Sum(temp, valid_items);
     if(threadIdx.x == 0)
         squeue[blockIdx.x] = temp;
-}
-
-
-
-__global__ void add_reduction(double* mem, int numbers)
-{
-    int idof = blockIdx.x * blockDim.x;
-    int idx  = threadIdx.x + idof;
-    int valid_items = min(numbers - idof, static_cast<int>(blockDim.x));
-    double temp = idx < numbers ? mem[idx] : 0.0;
-
-    using BlockReduce = cub::BlockReduce<double, 256>;
-    __shared__ typename BlockReduce::TempStorage storage;
-    temp = BlockReduce(storage).Sum(temp, valid_items);
-    if(threadIdx.x == 0)
-        mem[blockIdx.x] = temp;
 }
 
 
@@ -58,7 +43,11 @@ __global__ void update_vector_c(
 }
 
 
-double My_PCG_General_v_v_Reduction_Algorithm(double* temp, double* A, double* B, int vertexNum)
+double My_PCG_General_v_v_Reduction_Algorithm(double*       partials,
+                                              const double* A,
+                                              const double* B,
+                                              double*       result_output,
+                                              int           vertexNum)
 {
 
     int numbers = vertexNum;
@@ -67,21 +56,12 @@ double My_PCG_General_v_v_Reduction_Algorithm(double* temp, double* A, double* B
     const unsigned int threadNum = 256;
     int                blockNum  = (numbers + threadNum - 1) / threadNum;
 
-    unsigned int sharedMsize = sizeof(double) * (threadNum >> 5);
-    PCG_vdv_Reduction<<<blockNum, threadNum, sharedMsize>>>(temp, A, B, numbers);
+    PCG_vdv_Reduction<<<blockNum, threadNum>>>(partials, A, B, numbers);
+    cudatool::DeviceReduce().Sum(partials, result_output, blockNum);
 
-
-    numbers  = blockNum;
-    blockNum = (numbers + threadNum - 1) / threadNum;
-
-    while(numbers > 1)
-    {
-        add_reduction<<<blockNum, threadNum, sharedMsize>>>(temp, numbers);
-        numbers  = blockNum;
-        blockNum = (numbers + threadNum - 1) / threadNum;
-    }
-    double result;
-    CUDA_SAFE_CALL(cudaMemcpy(&result, temp, sizeof(double), cudaMemcpyDeviceToHost));
+    double result = 0.0;
+    CUDA_SAFE_CALL(
+        cudaMemcpy(&result, result_output, sizeof(result), cudaMemcpyDeviceToHost));
     return result;
 }
 
@@ -101,6 +81,7 @@ SizeT PCGSolver::solve(cudatool::DenseVectorView<Float> x, cudatool::CDenseVecto
     r.resize(b.size());
     //temp.resize(b.size());
     Ap.resize(b.size());
+    reduction_result.resize_discard(1);
     auto iter = pcg(x, b, m_config.max_iter_ratio * b.size());
 
     return iter;
@@ -125,6 +106,7 @@ SizeT PCGSolver::pcg(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorV
         rz = My_PCG_General_v_v_Reduction_Algorithm(p.buffer_view().data(),
                                                     r.buffer_view().data(),
                                                     z.buffer_view().data(),
+                                                    reduction_result.data(),
                                                     z.size());
     }
 
@@ -146,6 +128,7 @@ SizeT PCGSolver::pcg(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorV
                 My_PCG_General_v_v_Reduction_Algorithm(z.buffer_view().data(),
                                                        p.buffer_view().data(),
                                                        Ap.buffer_view().data(),
+                                                       reduction_result.data(),
                                                        z.size());
 
             alpha = rz / dot_res;
@@ -179,6 +162,7 @@ SizeT PCGSolver::pcg(cudatool::DenseVectorView<Float> x, cudatool::CDenseVectorV
             rz_new = My_PCG_General_v_v_Reduction_Algorithm(Ap.buffer_view().data(),
                                                             r.buffer_view().data(),
                                                             z.buffer_view().data(),
+                                                            reduction_result.data(),
                                                             z.size());
         }
 

@@ -32,6 +32,7 @@ class PCGSolver : public IterativeSolver
     DeviceDenseVector r;   // residual
     DeviceDenseVector p;   // search direction
     DeviceDenseVector Ap;  // A*p
+    cudatool::DeviceBuffer<Float> reduction_result;
     PCGSolverConfig   m_config;
 
   protected:
